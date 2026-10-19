@@ -1,0 +1,12 @@
+{
+  "appId": "com.safarkaabe.travel",
+  "appName": "SAFAR KAABE",
+  "webDir": "android-web",
+  "server": {
+    "url": "http://localhost:4173/?platform=android",
+    "cleartext": true,
+    "allowNavigation": [
+      "localhost"
+    ]
+  }
+}

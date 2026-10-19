@@ -1,0 +1,13 @@
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+node_modules/
+.vercel/
+.env
+.env.*
+!.env.example
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/

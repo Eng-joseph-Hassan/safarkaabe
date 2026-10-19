@@ -1,0 +1,22 @@
+{
+  "name": "safar-kaabe-travel-marketplace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Responsive installable travel marketplace web app",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/core": "^7.6.9",
+    "nodemailer": "^10.1.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.9",
+    "smtp-server": "^3.20.2"
+  }
+}
