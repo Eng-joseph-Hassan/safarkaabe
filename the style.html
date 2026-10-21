@@ -1549,9 +1549,11 @@
                       <th class="p-3.5">Client / Traveler</th>
                       <th class="p-3.5">Service</th>
                       <th class="p-3.5">Booking code</th>
+                      <th class="p-3.5">Seats</th>
                       <th class="p-3.5">Estimated total</th>
                       <th class="p-3.5">Potential commission</th>
-                      <th class="p-3.5">State</th>
+                      <th class="p-3.5">Status</th>
+                      <th class="p-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="agencyBookingsTableBody" class="divide-y divide-white/10"></tbody>
@@ -2054,6 +2056,38 @@
     <div class="w-full max-w-xs rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl"><h3 id="chatCommunityActionsTitle" class="mb-4 truncate font-extrabold text-white">Manage community</h3><div class="space-y-2"><button id="chatCommunityEditAction" type="button" onclick="editManagedChatCommunity()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit details</button><button id="chatCommunityLeaveAction" type="button" onclick="leaveManagedChatCommunity()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-arrow-right-from-bracket mr-2 text-amber-300"></i>Leave community</button><button id="chatCommunityDeleteAction" type="button" onclick="deleteManagedChatCommunity()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i>Delete community</button></div><button type="button" onclick="closeChatCommunityActions()" class="mt-3 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-400">Cancel</button></div>
   </div>
 
+  <div id="agencyBookingActions" class="fixed inset-0 z-[75] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="agencyBookingActionsTitle" onclick="if(event.target===this)closeAgencyBookingActions()">
+    <section class="w-full max-w-sm rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl">
+      <h3 id="agencyBookingActionsTitle" class="truncate font-extrabold text-white">Booking request</h3>
+      <p id="agencyBookingActionsDescription" class="mt-1 mb-4 text-[10px] text-slate-400">Choose what you want to do with this request.</p>
+      <div class="space-y-2">
+        <button type="button" onclick="viewActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-regular fa-eye mr-2 text-blue-300"></i>View booking details</button>
+        <button id="agencyBookingEditAction" type="button" onclick="editActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit traveler details</button>
+        <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i>Cancel request and return seats</button>
+        <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
+      </div>
+      <button type="button" onclick="closeAgencyBookingActions()" class="mt-3 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-400">Close</button>
+    </section>
+  </div>
+
+  <div id="agencyBookingDetailsModal" class="fixed inset-0 z-[76] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="agencyBookingDetailsTitle" onclick="if(event.target===this)closeAgencyBookingDetails()">
+    <section class="w-full max-w-lg rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between gap-3"><h3 id="agencyBookingDetailsTitle" class="truncate font-extrabold text-white">Booking details</h3><button type="button" onclick="closeAgencyBookingDetails()" class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5 text-slate-300" aria-label="Close booking details"><i class="fa-solid fa-xmark"></i></button></div>
+      <div id="agencyBookingDetailsContent" class="space-y-3"></div>
+      <button type="button" onclick="closeAgencyBookingDetails()" class="mt-5 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Close</button>
+    </section>
+  </div>
+
+  <div id="agencyBookingEditModal" class="fixed inset-0 z-[76] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="agencyBookingEditTitle" onclick="if(event.target===this)closeAgencyBookingEdit()">
+    <form id="agencyBookingEditForm" onsubmit="saveActiveAgencyBooking(event)" class="w-full max-w-md space-y-4 rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl">
+      <div class="flex items-center justify-between gap-3"><div><h3 id="agencyBookingEditTitle" class="font-extrabold text-white">Edit traveler details</h3><p class="mt-1 text-[10px] text-slate-400">Changes apply to this booking request only.</p></div><button type="button" onclick="closeAgencyBookingEdit()" class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5 text-slate-300" aria-label="Close edit form"><i class="fa-solid fa-xmark"></i></button></div>
+      <label class="block text-xs font-semibold text-slate-300">Traveler name<input id="agencyBookingEditName" required maxlength="160" class="obsidian-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm"></label>
+      <label class="block text-xs font-semibold text-slate-300">Email address <span class="font-normal text-slate-500">(optional)</span><input id="agencyBookingEditEmail" type="email" maxlength="254" class="obsidian-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm"></label>
+      <label class="block text-xs font-semibold text-slate-300">Phone number<input id="agencyBookingEditPhone" required maxlength="40" type="tel" class="obsidian-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm"></label>
+      <div class="flex justify-end gap-2"><button type="button" onclick="closeAgencyBookingEdit()" class="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Cancel</button><button id="agencyBookingEditSave" type="submit" class="rounded-xl bg-blue-400 px-5 py-2.5 text-xs font-extrabold text-[#06111b]">Save changes</button></div>
+    </form>
+  </div>
+
   <div id="toastBox" class="fixed bottom-5 right-5 bg-[#0D1322] border border-blue-500/50 text-white text-xs font-semibold px-4 py-3.5 rounded-2xl shadow-2xl hidden z-50 flex items-center gap-2.5 no-print">
     <i class="fa-solid fa-circle-check text-blue-400 text-sm"></i>
     <span id="toastText"></span>
@@ -2073,6 +2107,7 @@
     let globalSearchQuery = '';
     let deferredInstallPrompt = null;
     let currentUser = null;
+    let activeAgencyBookingId = null;
     let setupRequired = false;
     let setupTokenRequired = false;
     let authMode = 'login';
@@ -2721,7 +2756,7 @@
 
     function getVisibleBookings() {
       if (!currentUser) return BOOKINGS.filter(booking => !booking.customerId);
-      if (currentUser.role === 'AGENCY') return BOOKINGS.filter(booking => booking.agencyId === currentUser.agencyId);
+      if (currentUser.role === 'AGENCY') return BOOKINGS.filter(booking => booking.agencyId === currentUser.agencyId && booking.state !== 'CANCELLED');
       if (currentUser.role === 'CLIENT') return BOOKINGS.filter(booking => booking.customerId === currentUser.customerId);
       return BOOKINGS;
     }
@@ -5503,6 +5538,182 @@
     }
 
     // ==================== TRAVEL AGENCY COMPANY DASHBOARD ====================
+    function getActiveAgencyBooking() {
+      const booking = BOOKINGS.find(item => item.id === activeAgencyBookingId);
+      if (!booking) return null;
+      if (currentUser?.role === 'AGENCY' && booking.agencyId !== currentUser.agencyId) return null;
+      if (currentUser?.role === 'SUPER_ADMIN' && booking.agencyId !== document.getElementById('agencyCompanySelector').value) return null;
+      return booking;
+    }
+
+    function bookingStatePresentation(state) {
+      const labels = {
+        REQUESTED: 'REQUESTED',
+        PAYMENT_PENDING: 'PAYMENT PENDING',
+        PAYMENT_RECEIVED: 'PAYMENT RECEIVED',
+        ACCEPTED: 'ACCEPTED',
+        CANCELLED: 'CANCELLED'
+      };
+      const styles = {
+        REQUESTED: 'bg-blue-500/20 text-blue-300',
+        PAYMENT_PENDING: 'bg-amber-500/15 text-amber-200',
+        PAYMENT_RECEIVED: 'bg-emerald-500/15 text-emerald-300',
+        ACCEPTED: 'bg-emerald-500/15 text-emerald-300',
+        CANCELLED: 'bg-slate-500/15 text-slate-300'
+      };
+      return `<span class="rounded px-2 py-1 font-bold text-[10px] ${styles[state] || 'bg-white/10 text-slate-300'}">${labels[state] || escapeHtml(state)}</span>`;
+    }
+
+    function openAgencyBookingActions(bookingId) {
+      activeAgencyBookingId = bookingId;
+      const booking = getActiveAgencyBooking();
+      if (!booking) {
+        showToast('This booking is not available in the selected agency.');
+        return;
+      }
+      const canEdit = booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY';
+      const canCancel = canEdit && Boolean(booking.offerId);
+      document.getElementById('agencyBookingActionsTitle').textContent = `Request ${booking.ref}`;
+      document.getElementById('agencyBookingActionsDescription').textContent = `${booking.travelerName} · ${booking.offerTitle}`;
+      document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
+      const cancelButton = document.getElementById('agencyBookingCancelAction');
+      cancelButton.classList.toggle('hidden', !canEdit);
+      cancelButton.disabled = !canCancel;
+      cancelButton.classList.toggle('opacity-50', !canCancel);
+      const cancelNote = document.getElementById('agencyBookingCancelNote');
+      cancelNote.classList.toggle('hidden', canCancel || !canEdit);
+      cancelNote.textContent = booking.offerId
+        ? 'Only new, unpaid requests can be removed from the active list.'
+        : 'This older request is not linked to a trip record, so its seats cannot be safely returned.';
+      const modal = document.getElementById('agencyBookingActions');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeAgencyBookingActions() {
+      const modal = document.getElementById('agencyBookingActions');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function viewActiveAgencyBooking() {
+      const booking = getActiveAgencyBooking();
+      if (!booking) return;
+      closeAgencyBookingActions();
+      document.getElementById('agencyBookingDetailsTitle').textContent = `Request ${booking.ref}`;
+      document.getElementById('agencyBookingDetailsContent').innerHTML = `
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Traveler</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.travelerName)}</div><div class="mt-1 break-all text-[10px] text-slate-400">${escapeHtml(booking.travelerEmail || 'No email')} · ${escapeHtml(booking.phone)}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Trip</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.offerTitle)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(booking.category)}${booking.travelDate ? ` · ${escapeHtml(booking.travelDate)}` : ' · Flexible date'}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Seats requested</div><div class="mt-1 font-bold text-white">${Number(booking.seatCount) || 1}</div><div class="mt-1 text-[10px] text-slate-400">Booking code: ${escapeHtml(booking.pnr)}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}</div><div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
+        </div>`;
+      const modal = document.getElementById('agencyBookingDetailsModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeAgencyBookingDetails() {
+      const modal = document.getElementById('agencyBookingDetailsModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function editActiveAgencyBooking() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || booking.state !== 'REQUESTED' || booking.paymentProvider !== 'REQUEST_ONLY') {
+        showToast('Traveler details can only be edited before a request is accepted or paid.');
+        return;
+      }
+      closeAgencyBookingActions();
+      document.getElementById('agencyBookingEditName').value = booking.travelerName || '';
+      document.getElementById('agencyBookingEditEmail').value = booking.travelerEmail || '';
+      document.getElementById('agencyBookingEditPhone').value = booking.phone || '';
+      const modal = document.getElementById('agencyBookingEditModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.getElementById('agencyBookingEditName').focus();
+    }
+
+    function closeAgencyBookingEdit() {
+      const modal = document.getElementById('agencyBookingEditModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    async function saveActiveAgencyBooking(event) {
+      event.preventDefault();
+      const booking = getActiveAgencyBooking();
+      if (!booking) return;
+      const button = document.getElementById('agencyBookingEditSave');
+      button.disabled = true;
+      try {
+        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}`, {
+          method: 'PATCH',
+          body: {
+            action: 'EDIT',
+            travelerName: document.getElementById('agencyBookingEditName').value.trim(),
+            travelerEmail: document.getElementById('agencyBookingEditEmail').value.trim(),
+            phone: document.getElementById('agencyBookingEditPhone').value.trim()
+          }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item);
+        closeAgencyBookingEdit();
+        renderAgencyPortal();
+        renderAdminPortal();
+        showToast('Traveler details updated.');
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function acceptAgencyBooking(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking || !['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state)) return;
+      const button = document.getElementById(`agencyBookingAccept_${bookingId}`);
+      if (button) button.disabled = true;
+      try {
+        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
+          method: 'PATCH',
+          body: { action: 'ACCEPT' }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        updateBookingBadges();
+        showToast(booking.state === 'PAYMENT_RECEIVED' ? 'Payment received. Booking request accepted.' : 'Booking request accepted.');
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        if (button?.isConnected) button.disabled = false;
+      }
+    }
+
+    async function cancelActiveAgencyBooking() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || booking.state !== 'REQUESTED' || booking.paymentProvider !== 'REQUEST_ONLY' || !booking.offerId) return;
+      if (!window.confirm(`Delete request ${booking.ref}? Its ${Number(booking.seatCount) || 1} seat(s) will return to available inventory.`)) return;
+      const bookingId = booking.id;
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, { method: 'DELETE' });
+        BOOKINGS = BOOKINGS.map(item => item.id === bookingId ? { ...item, state: 'CANCELLED' } : item);
+        if (result.offerId && Number.isFinite(Number(result.available))) {
+          CATALOG = CATALOG.map(item => item.id === result.offerId ? { ...item, available: Number(result.available) } : item);
+        }
+        closeAgencyBookingActions();
+        renderAgencyPortal();
+        renderSupplierPortal();
+        renderCatalog();
+        renderAdminPortal();
+        updateBookingBadges();
+        showToast('Request removed from the active list. Its seats are available again.');
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
     function renderAgencyPortal() {
       const tenantId = currentUser.role === 'AGENCY'
         ? currentUser.agencyId
@@ -5514,7 +5725,7 @@
       document.getElementById('staffCountLabel').innerText = agency.staff.length;
       document.getElementById('clientCountLabel').innerText = agency.clients.length;
 
-      const tenantBookings = BOOKINGS.filter(b => b.agencyId === tenantId);
+      const tenantBookings = BOOKINGS.filter(b => b.agencyId === tenantId && b.state !== 'CANCELLED');
       const openRequests = tenantBookings.filter(booking => booking.state === 'REQUESTED');
       const requestValue = openRequests.reduce((sum, booking) => sum + booking.financials.customerGrandTotalCents, 0);
       const potentialCommission = openRequests.reduce((sum, booking) => sum + booking.financials.agencyCommissionCents, 0);
@@ -5526,9 +5737,26 @@
         <div class="p-4 rounded-2xl bg-black/50 border border-white/10"><div class="text-xs text-slate-400">Staff and clients</div><div class="text-xs font-mono-code font-bold text-blue-400 mt-2">${agency.staff.length} staff · ${agency.clients.length} clients</div></div>
       `;
 
-      document.getElementById('agencyBookingsTableBody').innerHTML = tenantBookings.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No bookings for this company yet.</td></tr>` : tenantBookings.map(b => `
-        <tr class="hover:bg-white/5"><td class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td><td class="p-3"><div>${escapeHtml(b.travelerName)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(b.travelerEmail || 'No email')} · ${escapeHtml(b.phone)}</div></td><td class="p-3">${escapeHtml(b.offerTitle)}</td><td class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td><td class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td><td class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td><td class="p-3"><span class="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded font-bold text-[10px]">${escapeHtml(b.state)}</span></td></tr>
-      `).join('');
+      document.getElementById('agencyBookingsTableBody').innerHTML = tenantBookings.length === 0
+        ? `<tr><td colspan="9" class="p-4 text-center text-slate-500">No active booking requests for this company.</td></tr>`
+        : tenantBookings.map(b => {
+          const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(b.state);
+          return `
+            <tr class="hover:bg-white/5">
+              <td class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td>
+              <td class="p-3"><div>${escapeHtml(b.travelerName)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(b.travelerEmail || 'No email')} · ${escapeHtml(b.phone)}</div></td>
+              <td class="p-3">${escapeHtml(b.offerTitle)}</td>
+              <td class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td>
+              <td class="p-3 text-center font-mono-code">${Number(b.seatCount) || 1}</td>
+              <td class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
+              <td class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
+              <td class="p-3">${bookingStatePresentation(b.state)}</td>
+              <td class="p-3"><div class="flex items-center justify-end gap-2">
+                ${canAccept ? `<button id="agencyBookingAccept_${escapeHtml(b.id)}" type="button" onclick="acceptAgencyBooking('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-2 text-[10px] font-extrabold text-[#06241c] hover:bg-emerald-300">Accept request</button>` : ''}
+                <button type="button" onclick="openAgencyBookingActions('${escapeHtml(b.id)}')" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" aria-label="More actions for booking ${escapeHtml(b.ref)}" title="More actions"><i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button>
+              </div></td>
+            </tr>`;
+        }).join('');
 
       document.getElementById('agencyStaffList').innerHTML = agency.staff.length === 0 ? `<div class="text-slate-500 text-xs">No staff members assigned yet.</div>` : agency.staff.map((s, idx) => `
         <div class="p-3.5 bg-white/5 rounded-xl border border-white/10 flex justify-between items-center text-xs">

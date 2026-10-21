@@ -433,6 +433,7 @@ async function initializeDatabase() {
     if (!bookingColumns.has('travel_date')) await db.exec('ALTER TABLE bookings ADD COLUMN travel_date TEXT');
     if (!bookingColumns.has('traveler_email')) await db.exec('ALTER TABLE bookings ADD COLUMN traveler_email TEXT');
     if (!bookingColumns.has('seat_count')) await db.exec('ALTER TABLE bookings ADD COLUMN seat_count INTEGER NOT NULL DEFAULT 1 CHECK (seat_count > 0)');
+    if (!bookingColumns.has('offer_id')) await db.exec('ALTER TABLE bookings ADD COLUMN offer_id TEXT REFERENCES catalog_products(id) ON DELETE SET NULL');
   } else {
     await db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
@@ -450,6 +451,7 @@ async function initializeDatabase() {
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS traveler_email TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS travel_date TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_id TEXT REFERENCES catalog_products(id) ON DELETE SET NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'AVAILABLE';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS typing_conversation_id TEXT;
@@ -462,6 +464,22 @@ async function initializeDatabase() {
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TEXT;
     `);
   }
+
+  await db.prepare(`
+    UPDATE bookings
+    SET offer_id = (
+      SELECT products.id
+      FROM catalog_products products
+      WHERE products.agency_id = bookings.agency_id
+        AND products.title = bookings.offer_title
+        AND products.category = bookings.category
+        AND (SELECT COUNT(*) FROM catalog_products matching
+          WHERE matching.agency_id = bookings.agency_id
+            AND matching.title = bookings.offer_title
+            AND matching.category = bookings.category) = 1
+    )
+    WHERE offer_id IS NULL
+  `).run();
 
   const demoAgencyPlaceholders = demoAgencyIds.map(() => '?').join(', ');
   const protectedDemoAgencyIds = new Set(
@@ -2194,12 +2212,109 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    const bookingActionMatch = pathname.match(/^\/api\/bookings\/([0-9a-f-]+)$/i);
+    if (bookingActionMatch && ['PATCH', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, ['AGENCY', 'SUPER_ADMIN'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const bookingId = bookingActionMatch[1];
+      const selectBooking = `SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId,
+        customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone,
+        offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json,
+        seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc,
+        (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus,
+        (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId,
+        (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference
+        FROM bookings WHERE id = ?`;
+      const existing = await db.prepare(selectBooking).get(bookingId);
+      if (!existing || (user.role === 'AGENCY' && existing.agencyId !== user.agency_id)) {
+        sendJson(response, 404, { error: 'Booking request not found.' });
+        return;
+      }
+
+      if (method === 'PATCH') {
+        const body = await readJson(request);
+        if (body.action === 'ACCEPT') {
+          if (!['REQUESTED', 'PAYMENT_RECEIVED'].includes(existing.state)) {
+            sendJson(response, 409, { error: 'Only a new request or a paid request can be accepted.' });
+            return;
+          }
+          const accepted = await db.prepare('UPDATE bookings SET state = ? WHERE id = ? AND agency_id = ? AND state = ?')
+            .run('ACCEPTED', bookingId, existing.agencyId, existing.state);
+          if (accepted.changes !== 1) {
+            sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_REQUEST_ACCEPTED', `${existing.ref} (${existing.agencyId})`);
+        } else if (body.action === 'EDIT') {
+          if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
+            sendJson(response, 409, { error: 'Traveler details can only be edited before the request is accepted or paid.' });
+            return;
+          }
+          if (body.travelerEmail !== undefined && body.travelerEmail !== null && typeof body.travelerEmail !== 'string') {
+            sendJson(response, 400, { error: 'Enter a valid traveler email address or leave it blank.' });
+            return;
+          }
+          const travelerName = requireString(body.travelerName, 'Traveler name');
+          const travelerEmailText = typeof body.travelerEmail === 'string' ? body.travelerEmail.trim() : '';
+          const travelerEmail = travelerEmailText ? normalizeEmail(travelerEmailText) : null;
+          const phone = requireString(body.phone, 'Phone', 40);
+          const updated = await db.prepare(`UPDATE bookings SET traveler_name = ?, traveler_email = ?, phone = ?
+            WHERE id = ? AND agency_id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'`)
+            .run(travelerName, travelerEmail, phone, bookingId, existing.agencyId);
+          if (updated.changes !== 1) {
+            sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_TRAVELER_DETAILS_UPDATED', `${existing.ref} (${existing.agencyId})`);
+        } else {
+          sendJson(response, 400, { error: 'Choose accept or edit traveler details.' });
+          return;
+        }
+
+        const updatedBooking = await db.prepare(selectBooking).get(bookingId);
+        const { financials_json, ...booking } = updatedBooking;
+        sendJson(response, 200, { booking: { ...booking, financials: JSON.parse(financials_json) } });
+        return;
+      }
+
+      if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
+        sendJson(response, 409, { error: 'Only new, unpaid requests can be canceled here. Accepted or paid bookings stay in the history.' });
+        return;
+      }
+      if (!existing.offerId) {
+        sendJson(response, 409, { error: 'This older request has no linked trip, so its seats cannot be safely returned.' });
+        return;
+      }
+      const canceled = await runInTransaction(async () => {
+        const removed = await db.prepare(`UPDATE bookings SET state = 'CANCELLED'
+          WHERE id = ? AND agency_id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'
+          AND offer_id = ? RETURNING seat_count AS seatCount`)
+          .get(bookingId, existing.agencyId, existing.offerId);
+        if (!removed) return false;
+        const inventory = await db.prepare(`UPDATE catalog_products SET available = available + ?
+          WHERE id = ? AND agency_id = ?`).run(removed.seatCount, existing.offerId, existing.agencyId);
+        if (inventory.changes !== 1) {
+          throw Object.assign(new Error('The trip inventory could not be restored. The request was not canceled.'), { statusCode: 409 });
+        }
+        await audit(user.id, 'BOOKING_REQUEST_CANCELLED', `${existing.ref} (${existing.agencyId})`);
+        const restored = await db.prepare('SELECT available FROM catalog_products WHERE id = ?').get(existing.offerId);
+        return { offerId: existing.offerId, available: restored.available };
+      });
+      if (!canceled) {
+        sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
+        return;
+      }
+      publishCatalogChange('availability');
+      sendJson(response, 200, { ok: true, message: 'Request canceled. Its seats are available again.', ...canceled });
+      return;
+    }
+
     if (pathname === '/api/bookings' && method === 'GET') {
       const query = user.role === 'SUPER_ADMIN'
-        ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings ORDER BY created_at DESC`)
+        ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings ORDER BY created_at DESC`)
         : user.role === 'AGENCY'
-          ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE agency_id = ? ORDER BY created_at DESC`)
-          : await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE customer_id = ? ORDER BY created_at DESC`);
+          ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE agency_id = ? ORDER BY created_at DESC`)
+          : await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE customer_id = ? ORDER BY created_at DESC`);
       const records = user.role === 'SUPER_ADMIN' ? await query.all() : await query.all(user.role === 'AGENCY' ? user.agency_id : user.id);
       sendJson(response, 200, { bookings: records.map(({ financials_json, ...booking }) => ({ ...booking, financials: JSON.parse(financials_json) })) });
       return;
@@ -2291,6 +2406,7 @@ async function handleApi(request, response, url) {
         reference: `SK-${randomCode()}`,
         pnr: `REQ-SK-${randomCode()}`,
         agencyId: offer.agency_id,
+        offerId: offer.id,
         customerId: user?.role === 'CLIENT' ? user.id : null,
         travelerName,
         travelerEmail,
@@ -2354,9 +2470,9 @@ async function handleApi(request, response, url) {
       try {
         await runInTransaction(async () => {
         await db.prepare(`
-          INSERT INTO bookings (id, reference, pnr, agency_id, customer_id, traveler_name, traveler_email, phone, offer_title, category, payment_provider, state, financials_json, seat_count, travel_date, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(booking.id, booking.reference, booking.pnr, booking.agencyId, booking.customerId, booking.travelerName, booking.travelerEmail, booking.phone, booking.offerTitle, booking.category, booking.paymentProvider, booking.state, JSON.stringify(booking.financials), booking.seatCount, booking.travelDate, createdAtUtc);
+          INSERT INTO bookings (id, reference, pnr, agency_id, offer_id, customer_id, traveler_name, traveler_email, phone, offer_title, category, payment_provider, state, financials_json, seat_count, travel_date, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(booking.id, booking.reference, booking.pnr, booking.agencyId, booking.offerId, booking.customerId, booking.travelerName, booking.travelerEmail, booking.phone, booking.offerTitle, booking.category, booking.paymentProvider, booking.state, JSON.stringify(booking.financials), booking.seatCount, booking.travelDate, createdAtUtc);
         if (paymentStart) {
           await db.prepare(`INSERT INTO waafi_payments (id, booking_id, reference_id, amount_cents, currency, status, hpp_url, order_id, updated_at, created_at)
             VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?, ?)`)
