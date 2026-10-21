@@ -2063,8 +2063,8 @@
       <div class="space-y-2">
         <button type="button" onclick="viewActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-regular fa-eye mr-2 text-blue-300"></i>View booking details</button>
         <button id="agencyBookingEditAction" type="button" onclick="editActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit traveler details</button>
-        <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i>Delete request</button>
-        <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">Deleting removes the request from the active list, returns its seats, and keeps a canceled record in booking history.</p>
+        <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i><span id="agencyBookingCancelActionLabel">Delete request</span></button>
+        <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">The canceled request stays in booking history. Seats return to inventory when the ticket has not been issued.</p>
         <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
       </div>
       <button type="button" onclick="closeAgencyBookingActions()" class="mt-3 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-400">Close</button>
@@ -2077,6 +2077,15 @@
       <div id="agencyBookingDetailsContent" class="space-y-3"></div>
       <button type="button" onclick="closeAgencyBookingDetails()" class="mt-5 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Close</button>
     </section>
+  </div>
+
+  <div id="agencyBookingCancelModal" class="fixed inset-0 z-[77] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="agencyBookingCancelTitle" onclick="if(event.target===this)closeAgencyBookingCancel()">
+    <form id="agencyBookingCancelForm" onsubmit="submitAgencyBookingCancellation(event)" class="w-full max-w-md space-y-4 rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl">
+      <div class="flex items-center justify-between gap-3"><div><h3 id="agencyBookingCancelTitle" class="font-extrabold text-white">Cancel booking request</h3><p id="agencyBookingCancelDescription" class="mt-1 text-[10px] text-slate-400">The canceled request stays in booking history.</p></div><button type="button" onclick="closeAgencyBookingCancel()" class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5 text-slate-300" aria-label="Close cancellation form"><i class="fa-solid fa-xmark"></i></button></div>
+      <label id="agencyBookingReturnSeatsField" class="hidden cursor-pointer rounded-xl border border-amber-400/15 bg-amber-500/[.06] p-3 text-xs text-amber-100"><span class="flex items-start gap-2"><input id="agencyBookingReturnSeats" type="checkbox" class="mt-0.5 accent-amber-400"><span id="agencyBookingReturnSeatsText">Return the seats to available inventory. Select this only if the travel ticket was not issued and the seats are free to sell again.</span></span></label>
+      <label class="block text-xs font-semibold text-slate-300">Reason for cancellation<textarea id="agencyBookingCancelReason" required maxlength="500" rows="3" class="obsidian-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm" placeholder="For example, traveler changed plans or the trip is unavailable"></textarea></label>
+      <div class="flex justify-end gap-2"><button type="button" onclick="closeAgencyBookingCancel()" class="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Keep request</button><button id="agencyBookingCancelSave" type="submit" class="rounded-xl bg-rose-500 px-5 py-2.5 text-xs font-extrabold text-white">Cancel request</button></div>
+    </form>
   </div>
 
   <div id="agencyBookingEditModal" class="fixed inset-0 z-[76] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="agencyBookingEditTitle" onclick="if(event.target===this)closeAgencyBookingEdit()">
@@ -4620,6 +4629,7 @@
               <span class="text-slate-400">${escapeHtml(booking.state)}</span>
             </div>
             <div class="mt-1 text-white">${escapeHtml(booking.offerTitle)}</div>
+            ${booking.cancellationReason ? `<div class="mt-1 text-amber-200">Cancellation reason: ${escapeHtml(booking.cancellationReason)}</div>` : ''}
             <div class="mt-1 text-slate-400">${booking.travelDate ? `Travel date: ${escapeHtml(booking.travelDate)} · ` : ''}Estimated total · not paid: ${formatMoney(booking.financials.customerGrandTotalCents)}</div>
           </div>`).join('')
         : '<div class="text-xs text-slate-500">No booking requests yet.</div>';
@@ -5573,17 +5583,26 @@
         return;
       }
       const canEdit = booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY';
-      const canCancel = canEdit && Boolean(booking.offerId);
+      const paymentReceived = booking.paymentStatus === 'APPROVED';
+      const canCancel = (booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId)))
+        || canEdit && Boolean(booking.offerId);
       document.getElementById('agencyBookingActionsTitle').textContent = `Request ${booking.ref}`;
       document.getElementById('agencyBookingActionsDescription').textContent = `${booking.travelerName} · ${booking.offerTitle}`;
       document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
       const cancelButton = document.getElementById('agencyBookingCancelAction');
-      cancelButton.classList.toggle('hidden', !canEdit);
+      cancelButton.classList.toggle('hidden', !canEdit && !canCancel);
       cancelButton.disabled = !canCancel;
       cancelButton.classList.toggle('opacity-50', !canCancel);
-      document.getElementById('agencyBookingRetentionNote').classList.toggle('hidden', !canCancel);
+      document.getElementById('agencyBookingCancelActionLabel').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request';
+      const retentionNote = document.getElementById('agencyBookingRetentionNote');
+      retentionNote.classList.toggle('hidden', !canCancel);
+      retentionNote.textContent = paymentReceived
+        ? booking.offerId
+          ? 'The canceled booking stays in history. Refunds are not automatic. Seats return only if you confirm the ticket was not issued.'
+          : 'The canceled booking stays in history. Refunds are not automatic, and these older seats cannot be returned from this screen.'
+        : 'The canceled request stays in booking history. Its seats return to inventory.';
       const cancelNote = document.getElementById('agencyBookingCancelNote');
-      cancelNote.classList.toggle('hidden', canCancel || !canEdit);
+      cancelNote.classList.toggle('hidden', canCancel || (!canEdit && booking.state !== 'ACCEPTED'));
       cancelNote.textContent = booking.offerId
         ? 'Only new, unpaid requests can be removed from the active list.'
         : 'This older request is not linked to a trip record, so its seats cannot be safely returned.';
@@ -5693,26 +5712,72 @@
       }
     }
 
-    async function cancelActiveAgencyBooking() {
+    function cancelActiveAgencyBooking() {
       const booking = getActiveAgencyBooking();
-      if (!booking || booking.state !== 'REQUESTED' || booking.paymentProvider !== 'REQUEST_ONLY' || !booking.offerId) return;
-      if (!window.confirm(`Delete request ${booking.ref}? Its ${Number(booking.seatCount) || 1} seat(s) will return to available inventory.`)) return;
-      const bookingId = booking.id;
+      const paymentReceived = booking?.paymentStatus === 'APPROVED';
+      const canCancel = booking && (
+        booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId))
+        || booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY' && Boolean(booking.offerId)
+      );
+      if (!canCancel) return;
+      closeAgencyBookingActions();
+      document.getElementById('agencyBookingCancelTitle').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete booking request';
+      document.getElementById('agencyBookingCancelDescription').textContent = paymentReceived
+        ? 'Payment was received. Canceling here will not automatically refund the traveler.'
+        : 'This request will be removed from the active list and its seats returned.';
+      const returnSeatsField = document.getElementById('agencyBookingReturnSeatsField');
+      const returnSeatsCheckbox = document.getElementById('agencyBookingReturnSeats');
+      returnSeatsField.classList.toggle('hidden', !paymentReceived);
+      returnSeatsCheckbox.checked = false;
+      returnSeatsCheckbox.disabled = !booking.offerId;
+      document.getElementById('agencyBookingReturnSeatsText').textContent = booking.offerId
+        ? 'Return the seats to available inventory. Select this only if the travel ticket was not issued and the seats are free to sell again.'
+        : 'This older booking has no linked trip record, so its seats will stay reserved.';
+      document.getElementById('agencyBookingCancelReason').value = '';
+      document.getElementById('agencyBookingCancelSave').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request';
+      const modal = document.getElementById('agencyBookingCancelModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.getElementById('agencyBookingCancelReason').focus();
+    }
+
+    function closeAgencyBookingCancel() {
+      const modal = document.getElementById('agencyBookingCancelModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    async function submitAgencyBookingCancellation(event) {
+      event.preventDefault();
+      const booking = getActiveAgencyBooking();
+      if (!booking) return;
+      const reason = document.getElementById('agencyBookingCancelReason').value.trim();
+      const paymentReceived = booking.paymentStatus === 'APPROVED';
+      const returnSeats = !paymentReceived || document.getElementById('agencyBookingReturnSeats').checked;
+      const button = document.getElementById('agencyBookingCancelSave');
+      button.disabled = true;
       try {
-        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, { method: 'DELETE' });
-        BOOKINGS = BOOKINGS.map(item => item.id === bookingId ? { ...item, state: 'CANCELLED' } : item);
-        if (result.offerId && Number.isFinite(Number(result.available))) {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}`, {
+          method: 'DELETE',
+          body: { reason, returnSeats, confirmTicketNotIssued: paymentReceived && returnSeats }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === booking.id
+          ? { ...item, state: 'CANCELLED', cancellationReason: reason }
+          : item);
+        if (result.seatsReturned && result.offerId && Number.isFinite(Number(result.available))) {
           CATALOG = CATALOG.map(item => item.id === result.offerId ? { ...item, available: Number(result.available) } : item);
         }
-        closeAgencyBookingActions();
+        closeAgencyBookingCancel();
         renderAgencyPortal();
         renderSupplierPortal();
         renderCatalog();
         renderAdminPortal();
         updateBookingBadges();
-        showToast('Request removed from the active list. Its seats are available again.');
+        showToast(result.message);
       } catch (error) {
         showToast(error.message);
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -6275,6 +6340,7 @@
         <div class="voucher-print-card p-4 rounded-2xl border border-white/10 bg-black/60 space-y-2 text-xs font-mono-code">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2"><span class="font-bold text-blue-300">Request ${escapeHtml(b.ref)} | Request number ${escapeHtml(b.pnr)}</span><span class="rounded-full px-2.5 py-1 text-[9px] font-bold ${b.paymentStatus === 'APPROVED' ? 'bg-emerald-500/15 text-emerald-300' : b.paymentStatus === 'PENDING' ? 'bg-amber-500/15 text-amber-200' : ['DECLINED', 'FAILED'].includes(b.paymentStatus) ? 'bg-rose-500/15 text-rose-300' : 'bg-blue-500/10 text-blue-200'}">${b.paymentStatus === 'APPROVED' ? 'PAYMENT RECEIVED' : b.paymentStatus === 'PENDING' ? 'PAYMENT PENDING' : ['DECLINED', 'FAILED'].includes(b.paymentStatus) ? 'PAYMENT FAILED' : escapeHtml(b.state)}</span></div>
           <div class="text-white font-sans font-bold text-sm">${escapeHtml(b.offerTitle)}</div>
+          ${b.cancellationReason ? `<div class="text-amber-200 font-sans">Cancellation reason: ${escapeHtml(b.cancellationReason)}</div>` : ''}
           ${b.travelDate ? `<div class="text-slate-400">Travel date: ${escapeHtml(b.travelDate)}</div>` : ''}
           <div class="text-slate-400">Traveler: ${escapeHtml(b.travelerName)} • ${escapeHtml(b.travelerEmail || '')} • ${escapeHtml(b.phone)}</div>
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-fuchsia-400/10 bg-gradient-to-r from-blue-500/[0.08] to-fuchsia-500/[0.08] p-2.5"><span class="font-bold text-blue-200">${b.paymentStatus === 'APPROVED' ? 'Paid with WaafiPay' : b.paymentProvider === 'WAAFI' ? 'WaafiPay ticket payment' : 'Estimated total - not paid'}</span><span class="font-bold text-fuchsia-200">${formatMoney(b.financials.customerGrandTotalCents)}</span></div>
