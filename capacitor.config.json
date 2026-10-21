@@ -3,10 +3,10 @@
   "appName": "SAFAR KAABE",
   "webDir": "android-web",
   "server": {
-    "url": "http://localhost:4173/?platform=android",
-    "cleartext": true,
+    "url": "https://travel-agancey-app.vercel.app/?platform=android",
+    "cleartext": false,
     "allowNavigation": [
-      "localhost"
+      "travel-agancey-app.vercel.app"
     ]
   }
 }

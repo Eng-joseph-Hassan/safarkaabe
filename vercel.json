@@ -1,0 +1,18 @@
+{
+  "functions": {
+    "server.js": {
+      "maxDuration": 15,
+      "includeFiles": "*.{html,jpg,jpeg,png,webmanifest,js}"
+    },
+    "api/[...path].js": {
+      "maxDuration": 15,
+      "includeFiles": "*.{html,jpg,jpeg,png,webmanifest,js}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/the%20style.html"
+    }
+  ]
+}

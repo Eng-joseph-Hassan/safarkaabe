@@ -8,12 +8,15 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "db:migrate:neon": "node scripts/migrate-sqlite-to-neon.js"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",
     "@capacitor/core": "^7.6.9",
-    "nodemailer": "^10.1.7"
+    "@neondatabase/serverless": "^1.0.2",
+    "nodemailer": "^10.1.7",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.9",
