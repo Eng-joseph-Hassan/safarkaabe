@@ -2063,7 +2063,8 @@
       <div class="space-y-2">
         <button type="button" onclick="viewActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-regular fa-eye mr-2 text-blue-300"></i>View booking details</button>
         <button id="agencyBookingEditAction" type="button" onclick="editActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit traveler details</button>
-        <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i>Cancel request and return seats</button>
+        <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i>Delete request</button>
+        <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">Deleting removes the request from the active list, returns its seats, and keeps a canceled record in booking history.</p>
         <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
       </div>
       <button type="button" onclick="closeAgencyBookingActions()" class="mt-3 w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-400">Close</button>
@@ -5580,6 +5581,7 @@
       cancelButton.classList.toggle('hidden', !canEdit);
       cancelButton.disabled = !canCancel;
       cancelButton.classList.toggle('opacity-50', !canCancel);
+      document.getElementById('agencyBookingRetentionNote').classList.toggle('hidden', !canCancel);
       const cancelNote = document.getElementById('agencyBookingCancelNote');
       cancelNote.classList.toggle('hidden', canCancel || !canEdit);
       cancelNote.textContent = booking.offerId
