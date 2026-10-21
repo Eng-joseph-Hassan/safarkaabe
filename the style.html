@@ -1549,11 +1549,9 @@
                       <th class="p-3.5">Client / Traveler</th>
                       <th class="p-3.5">Service</th>
                       <th class="p-3.5">Booking code</th>
-                      <th class="p-3.5">Seats</th>
                       <th class="p-3.5">Estimated total</th>
                       <th class="p-3.5">Potential commission</th>
-                      <th class="p-3.5">Status</th>
-                      <th class="p-3.5 text-right">Actions</th>
+                      <th class="p-3.5">Status & actions</th>
                     </tr>
                   </thead>
                   <tbody id="agencyBookingsTableBody" class="divide-y divide-white/10"></tbody>
@@ -5805,7 +5803,7 @@
       `;
 
       document.getElementById('agencyBookingsTableBody').innerHTML = tenantBookings.length === 0
-        ? `<tr><td colspan="9" class="p-4 text-center text-slate-500">No active booking requests for this company.</td></tr>`
+        ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No active booking requests for this company.</td></tr>`
         : tenantBookings.map(b => {
           const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(b.state);
           return `
@@ -5814,11 +5812,10 @@
               <td class="p-3"><div>${escapeHtml(b.travelerName)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(b.travelerEmail || 'No email')} · ${escapeHtml(b.phone)}</div></td>
               <td class="p-3">${escapeHtml(b.offerTitle)}</td>
               <td class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td>
-              <td class="p-3 text-center font-mono-code">${Number(b.seatCount) || 1}</td>
               <td class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
               <td class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
-              <td class="p-3">${bookingStatePresentation(b.state)}</td>
-              <td class="p-3"><div class="flex items-center justify-end gap-2">
+              <td class="min-w-[220px] p-3"><div class="flex flex-wrap items-center gap-2">
+                ${bookingStatePresentation(b.state)}
                 ${canAccept ? `<button id="agencyBookingAccept_${escapeHtml(b.id)}" type="button" onclick="acceptAgencyBooking('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-2 text-[10px] font-extrabold text-[#06241c] hover:bg-emerald-300">Accept request</button>` : ''}
                 <button type="button" onclick="openAgencyBookingActions('${escapeHtml(b.id)}')" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" aria-label="More actions for booking ${escapeHtml(b.ref)}" title="More actions"><i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button>
               </div></td>
