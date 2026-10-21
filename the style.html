@@ -740,6 +740,32 @@
       background: #0d111a;
       box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
     }
+    @media (max-width: 639px) {
+      #view_AGENCY .agency-dashboard-panel { padding: 1rem; border-radius: 1.25rem; }
+      #view_AGENCY .agency-dashboard-heading { align-items: stretch; gap: 1rem; }
+      #view_AGENCY .agency-dashboard-heading > div:last-child { flex: 1 1 100%; width: 100%; }
+      #view_AGENCY .agency-company-picker { width: 100%; }
+      #view_AGENCY #agencyDashboardTitle { font-size: 1.4rem; line-height: 1.2; }
+      #view_AGENCY #agencyKpiGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+      #view_AGENCY #agencyKpiGrid > div { min-width: 0; padding: .85rem; overflow-wrap: anywhere; }
+      #view_AGENCY .agency-dashboard-tabs > button { flex: 1 1 9rem; min-height: 2.75rem; padding-inline: .65rem; }
+      #view_AGENCY .agency-bookings-scroller { overflow: visible; border: 0; background: transparent; }
+      #view_AGENCY .agency-bookings-table { display: block; width: 100%; }
+      #view_AGENCY .agency-bookings-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+      #view_AGENCY #agencyBookingsTableBody { display: grid; gap: .75rem; border: 0; }
+      #view_AGENCY #agencyBookingsTableBody > tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem .85rem; padding: .9rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1rem; background: rgba(0,0,0,.42); }
+      #view_AGENCY #agencyBookingsTableBody > tr > td { display: flex; min-width: 0; flex-direction: column; gap: .3rem; overflow-wrap: anywhere; padding: 0; border: 0; }
+      #view_AGENCY #agencyBookingsTableBody > tr > td::before { content: attr(data-label); color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: .58rem; font-weight: 700; letter-spacing: .06em; line-height: 1.3; text-transform: uppercase; }
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(1),
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(2),
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(3),
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(4),
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(7) { grid-column: 1 / -1; }
+      #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(7) { padding-top: .7rem; border-top: 1px solid rgba(255,255,255,.08); }
+      #view_AGENCY #agencyBookingsTableBody > tr > td[colspan] { grid-column: 1 / -1; align-items: center; padding: .5rem; text-align: center; }
+      #view_AGENCY .agency-booking-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+      #view_AGENCY .agency-booking-row-actions > button { min-height: 2.75rem; }
+    }
     @media (max-width: 1100px) {
       #travelerBookingWorkspace { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
       #bookingRequestPanel { position: static; }
@@ -1515,8 +1541,8 @@
 
       <!-- ==================== 2. TRAVEL AGENCY COMPANY DASHBOARD ==================== -->
       <section id="view_AGENCY" class="hidden space-y-6">
-        <div class="glass-panel p-6 sm:p-8 rounded-3xl space-y-6">
-          <div class="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+        <div class="agency-dashboard-panel glass-panel p-6 sm:p-8 rounded-3xl space-y-6">
+          <div class="agency-dashboard-heading flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
             <div>
               <span class="bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] font-mono-code font-bold px-2.5 py-0.5 rounded-full">AGENCY COMPANY DASHBOARD</span>
               <h2 id="agencyDashboardTitle" class="text-2xl font-extrabold text-white mt-1.5">Agency Workspace</h2>
@@ -1524,14 +1550,14 @@
             </div>
             
             <div class="flex min-w-0 items-center gap-3">
-              <div class="w-full min-w-0 sm:w-auto">
+              <div class="agency-company-picker w-full min-w-0 sm:w-auto">
                 <label class="block text-[10px] font-mono-code uppercase text-slate-400 mb-1">Select Agency Company</label>
                 <select id="agencyCompanySelector" onchange="switchAgencyCompany(this.value)" class="obsidian-input w-full max-w-full min-w-0 rounded-xl px-3 py-2 text-xs font-bold"></select>
               </div>
             </div>
           </div>
 
-          <div class="flex flex-wrap gap-2 border-b border-white/10 pb-3 text-xs font-bold">
+          <div class="agency-dashboard-tabs flex flex-wrap gap-2 border-b border-white/10 pb-3 text-xs font-bold">
             <button onclick="switchAgencyTab('OVERVIEW')" id="agTab_OVERVIEW" class="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-500/30">Company Overview</button>
             <button onclick="switchAgencyTab('STAFF')" id="agTab_STAFF" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Manage Staff (<span id="staffCountLabel">0</span>)</button>
             <button onclick="switchAgencyTab('CLIENTS')" id="agTab_CLIENTS" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Clients (<span id="clientCountLabel">0</span>)</button>
@@ -1541,8 +1567,8 @@
             <div id="agencyKpiGrid" class="grid grid-cols-1 sm:grid-cols-4 gap-4"></div>
             <div>
               <h3 class="text-sm font-bold text-white mb-3">Company Bookings & Requests</h3>
-              <div class="overflow-x-auto border border-white/10 rounded-2xl bg-black/40">
-                <table class="w-full text-left text-xs">
+              <div class="agency-bookings-scroller overflow-x-auto border border-white/10 rounded-2xl bg-black/40">
+                <table class="agency-bookings-table w-full text-left text-xs">
                   <thead class="bg-white/5 text-slate-400 uppercase font-mono-code text-[11px]">
                     <tr>
                       <th class="p-3.5">Booking Ref</th>
@@ -5807,14 +5833,14 @@
         : tenantBookings.map(b => {
           const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(b.state);
           return `
-            <tr class="hover:bg-white/5">
-              <td class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td>
-              <td class="p-3"><div>${escapeHtml(b.travelerName)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(b.travelerEmail || 'No email')} · ${escapeHtml(b.phone)}</div></td>
-              <td class="p-3">${escapeHtml(b.offerTitle)}</td>
-              <td class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td>
-              <td class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
-              <td class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
-              <td class="min-w-[220px] p-3"><div class="flex flex-wrap items-center gap-2">
+            <tr class="agency-booking-row hover:bg-white/5">
+              <td data-label="Booking reference" class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td>
+              <td data-label="Traveler" class="p-3"><div>${escapeHtml(b.travelerName)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(b.travelerEmail || 'No email')} · ${escapeHtml(b.phone)}</div></td>
+              <td data-label="Service" class="p-3">${escapeHtml(b.offerTitle)}</td>
+              <td data-label="Booking code" class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td>
+              <td data-label="Estimated total" class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
+              <td data-label="Potential commission" class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
+              <td data-label="Status and actions" class="min-w-[220px] p-3"><div class="agency-booking-row-actions flex flex-wrap items-center gap-2">
                 ${bookingStatePresentation(b.state)}
                 ${canAccept ? `<button id="agencyBookingAccept_${escapeHtml(b.id)}" type="button" onclick="acceptAgencyBooking('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-2 text-[10px] font-extrabold text-[#06241c] hover:bg-emerald-300">Accept request</button>` : ''}
                 <button type="button" onclick="openAgencyBookingActions('${escapeHtml(b.id)}')" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" aria-label="More actions for booking ${escapeHtml(b.ref)}" title="More actions"><i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button>
