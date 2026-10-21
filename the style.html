@@ -2087,6 +2087,7 @@
       <div class="space-y-2">
         <button type="button" onclick="viewActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-regular fa-eye mr-2 text-blue-300"></i>View booking details</button>
         <button id="agencyBookingEditAction" type="button" onclick="editActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit traveler details</button>
+        <button id="agencyBookingUndoAcceptanceAction" type="button" onclick="undoActiveAgencyBookingAcceptance()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-rotate-left mr-2"></i>Undo acceptance</button>
         <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i><span id="agencyBookingCancelActionLabel">Delete request</span></button>
         <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">The canceled request stays in booking history. Seats return to inventory when the ticket has not been issued.</p>
         <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
@@ -5599,6 +5600,12 @@
       return `<span class="rounded px-2 py-1 font-bold text-[10px] ${styles[state] || 'bg-white/10 text-slate-300'}">${labels[state] || escapeHtml(state)}</span>`;
     }
 
+    function canUndoAgencyBookingAcceptance(booking) {
+      return booking?.state === 'ACCEPTED'
+        && booking.paymentProvider === 'REQUEST_ONLY'
+        && booking.paymentStatus !== 'APPROVED';
+    }
+
     function openAgencyBookingActions(bookingId) {
       activeAgencyBookingId = bookingId;
       const booking = getActiveAgencyBooking();
@@ -5607,12 +5614,14 @@
         return;
       }
       const canEdit = booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY';
+      const canUndoAcceptance = canUndoAgencyBookingAcceptance(booking);
       const paymentReceived = booking.paymentStatus === 'APPROVED';
       const canCancel = (booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId)))
         || canEdit && Boolean(booking.offerId);
       document.getElementById('agencyBookingActionsTitle').textContent = `Request ${booking.ref}`;
       document.getElementById('agencyBookingActionsDescription').textContent = `${booking.travelerName} · ${booking.offerTitle}`;
       document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
+      document.getElementById('agencyBookingUndoAcceptanceAction').classList.toggle('hidden', !canUndoAcceptance);
       const cancelButton = document.getElementById('agencyBookingCancelAction');
       cancelButton.classList.toggle('hidden', !canEdit && !canCancel);
       cancelButton.disabled = !canCancel;
@@ -5736,6 +5745,39 @@
       }
     }
 
+    function undoActiveAgencyBookingAcceptance() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || !canUndoAgencyBookingAcceptance(booking)) return;
+      closeAgencyBookingActions();
+      undoAgencyBookingAcceptance(booking.id);
+    }
+
+    async function undoAgencyBookingAcceptance(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking || !canUndoAgencyBookingAcceptance(booking)) {
+        showToast('Only an unpaid accepted booking can return to the pending list. Paid bookings need to be canceled.');
+        return;
+      }
+      const button = document.getElementById(`agencyBookingUndo_${bookingId}`)
+        || document.getElementById('agencyBookingUndoAcceptanceAction');
+      if (button) button.disabled = true;
+      try {
+        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
+          method: 'PATCH',
+          body: { action: 'UNDO_ACCEPTANCE' }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        updateBookingBadges();
+        showToast('Acceptance undone. The request is pending again, and its seats remain reserved.');
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        if (button?.isConnected) button.disabled = false;
+      }
+    }
+
     function cancelActiveAgencyBooking() {
       const booking = getActiveAgencyBooking();
       const paymentReceived = booking?.paymentStatus === 'APPROVED';
@@ -5832,6 +5874,7 @@
         ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No active booking requests for this company.</td></tr>`
         : tenantBookings.map(b => {
           const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(b.state);
+          const canUndoAcceptance = canUndoAgencyBookingAcceptance(b);
           return `
             <tr class="agency-booking-row hover:bg-white/5">
               <td data-label="Booking reference" class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td>
@@ -5843,6 +5886,7 @@
               <td data-label="Status and actions" class="min-w-[220px] p-3"><div class="agency-booking-row-actions flex flex-wrap items-center gap-2">
                 ${bookingStatePresentation(b.state)}
                 ${canAccept ? `<button id="agencyBookingAccept_${escapeHtml(b.id)}" type="button" onclick="acceptAgencyBooking('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-2 text-[10px] font-extrabold text-[#06241c] hover:bg-emerald-300">Accept request</button>` : ''}
+                ${canUndoAcceptance ? `<button id="agencyBookingUndo_${escapeHtml(b.id)}" type="button" onclick="undoAgencyBookingAcceptance('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[10px] font-extrabold text-amber-200 hover:bg-amber-500/20" title="Return to pending requests without canceling this booking">Undo acceptance</button>` : ''}
                 <button type="button" onclick="openAgencyBookingActions('${escapeHtml(b.id)}')" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" aria-label="More actions for booking ${escapeHtml(b.ref)}" title="More actions"><i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button>
               </div></td>
             </tr>`;

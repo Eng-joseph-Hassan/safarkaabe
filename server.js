@@ -2247,6 +2247,20 @@ async function handleApi(request, response, url) {
             return;
           }
           await audit(user.id, 'BOOKING_REQUEST_ACCEPTED', `${existing.ref} (${existing.agencyId})`);
+        } else if (body.action === 'UNDO_ACCEPTANCE') {
+          if (existing.state !== 'ACCEPTED' || existing.paymentProvider !== 'REQUEST_ONLY' || existing.paymentStatus === 'APPROVED') {
+            sendJson(response, 409, { error: 'Only an unpaid accepted request can be returned to the pending list. Use booking cancellation for paid bookings.' });
+            return;
+          }
+          const reopened = await db.prepare(`UPDATE bookings SET state = 'REQUESTED'
+            WHERE id = ? AND agency_id = ? AND state = 'ACCEPTED' AND payment_provider = 'REQUEST_ONLY'
+              AND NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED')`)
+            .run(bookingId, existing.agencyId);
+          if (reopened.changes !== 1) {
+            sendJson(response, 409, { error: 'This booking can no longer be reopened. Refresh the bookings list and try again.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_ACCEPTANCE_UNDONE', `${existing.ref} (${existing.agencyId})`);
         } else if (body.action === 'EDIT') {
           if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
             sendJson(response, 409, { error: 'Traveler details can only be edited before the request is accepted or paid.' });
@@ -2269,7 +2283,7 @@ async function handleApi(request, response, url) {
           }
           await audit(user.id, 'BOOKING_TRAVELER_DETAILS_UPDATED', `${existing.ref} (${existing.agencyId})`);
         } else {
-          sendJson(response, 400, { error: 'Choose accept or edit traveler details.' });
+          sendJson(response, 400, { error: 'Choose accept, undo acceptance, or edit traveler details.' });
           return;
         }
 
