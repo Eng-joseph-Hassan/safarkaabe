@@ -1725,7 +1725,9 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /openBookingPdf\(bookingId\)/);
   assert.match(appMarkup, /zoomTicketPreview\(change\)/);
   assert.match(appMarkup, /retryBookingTicketEmail\(bookingId\)/);
-  assert.match(appMarkup, /id="ticketPdfFrame"[^>]*onload="ticketPdfFrameLoaded\(\)"/);
+  assert.match(appMarkup, /id="ticketPdfFrame"[^>]*loading="lazy"[^>]*><\/iframe>/);
+  assert.match(appMarkup, /ticketPdfFrame\.addEventListener\('load', ticketPdfFrameLoaded\)/);
+  assert.match(appMarkup, /ticketPdfFrame\.addEventListener\('error', ticketPdfFrameError\)/);
   assert.match(appMarkup, /id="ticketPdfRetryButton"/);
   assert.match(appMarkup, /const realtime = await apiRequest\('\/api\/catalog\/realtime'\)[\s\S]*?if \(!realtime\.supported \|\| requestId !== notificationRealtimeRequestId \|\| !currentUser\) return;[\s\S]*?new EventSource\('\/api\/notifications\/stream'\)/,
     'notification EventSource is only opened when the server supports persistent realtime connections');

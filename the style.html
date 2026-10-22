@@ -2172,7 +2172,7 @@
         <div><h2 id="ticketPreviewTitle" class="text-sm font-extrabold text-white">Booking confirmation</h2><p class="mt-1 text-[10px] text-slate-400">Agency-approved confirmation · Not an airline e-ticket</p></div>
         <div class="flex flex-wrap items-center justify-end gap-2 no-print"><button type="button" onclick="zoomTicketPreview(-20)" class="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-white/5 text-white" aria-label="Zoom out">−</button><button type="button" onclick="zoomTicketPreview(20)" class="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-white/5 text-white" aria-label="Zoom in">+</button><a id="ticketOpenPdfButton" href="#" target="_blank" rel="noopener" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[10px] font-bold text-slate-200 hover:bg-white/10">Open PDF</a><a id="ticketDownloadButton" href="#" download class="rounded-xl bg-blue-500 px-3 py-2 text-[10px] font-extrabold text-white hover:bg-blue-400"><i class="fa-solid fa-file-pdf mr-1"></i>Download PDF</a><a id="ticketJpgDownloadButton" href="#" download class="rounded-xl bg-fuchsia-500/15 px-3 py-2 text-[10px] font-extrabold text-fuchsia-200 hover:bg-fuchsia-500/25"><i class="fa-solid fa-image mr-1"></i>Download JPG</a><button type="button" onclick="printTicketPreview()" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[10px] font-bold text-slate-200 hover:bg-white/10"><i class="fa-solid fa-print mr-1"></i>Print</button><button type="button" onclick="closeTicketPreview()" class="grid h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-slate-300 hover:bg-white/10" aria-label="Close ticket preview"><i class="fa-solid fa-xmark"></i></button></div>
       </div>
-      <div class="min-h-0 flex-1 overflow-auto bg-slate-200 p-2 sm:p-5"><div class="flex items-center gap-2 px-2 py-1"><p id="ticketPdfStatus" class="text-xs text-slate-700" role="status">Loading saved ticket PDF…</p><button id="ticketPdfRetryButton" type="button" onclick="reloadTicketPdf()" class="hidden rounded-lg bg-rose-100 px-2 py-1 text-xs font-bold text-rose-800">Retry preview</button></div><iframe id="ticketPdfFrame" title="Booking confirmation PDF preview" class="h-[calc(100%-2.5rem)] min-h-[28rem] w-full rounded-xl bg-white" loading="lazy" onload="ticketPdfFrameLoaded()" onerror="ticketPdfFrameError()"></iframe><img id="ticketJpgFallback" class="hidden mx-auto max-h-full max-w-full rounded-xl bg-white object-contain shadow-xl" alt="Saved booking confirmation JPG preview" /></div>
+      <div class="min-h-0 flex-1 overflow-auto bg-slate-200 p-2 sm:p-5"><div class="flex items-center gap-2 px-2 py-1"><p id="ticketPdfStatus" class="text-xs text-slate-700" role="status">Loading saved ticket PDF…</p><button id="ticketPdfRetryButton" type="button" onclick="reloadTicketPdf()" class="hidden rounded-lg bg-rose-100 px-2 py-1 text-xs font-bold text-rose-800">Retry preview</button></div><iframe id="ticketPdfFrame" title="Booking confirmation PDF preview" class="h-[calc(100%-2.5rem)] min-h-[28rem] w-full rounded-xl bg-white" loading="lazy"></iframe><img id="ticketJpgFallback" class="hidden mx-auto max-h-full max-w-full rounded-xl bg-white object-contain shadow-xl" alt="Saved booking confirmation JPG preview" /></div>
     </div>
   </div>
 
@@ -7460,6 +7460,10 @@
     async function ticketPdfFrameError() {
       await showTicketJpgFallback('This device could not display the PDF inline. Showing the saved ticket image instead.');
     }
+
+    const ticketPdfFrame = document.getElementById('ticketPdfFrame');
+    ticketPdfFrame.addEventListener('load', ticketPdfFrameLoaded);
+    ticketPdfFrame.addEventListener('error', ticketPdfFrameError);
 
     async function fetchTicketDocumentBlob(bookingId, type) {
       const extension = type === 'jpg' ? 'jpg' : 'pdf';
