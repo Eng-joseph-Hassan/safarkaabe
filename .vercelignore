@@ -1,5 +1,7 @@
 .env*
 data/
+data/**
+*.sqlite*
 .agents/
 .claude/
 .codex-phone.png

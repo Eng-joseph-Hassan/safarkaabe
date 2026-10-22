@@ -4,10 +4,24 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const nodemailer = require('nodemailer');
+const webPush = require('web-push');
+const PDFDocument = require('pdfkit');
+const QRCode = require('qrcode');
+const sharp = require('sharp');
+const ticketCanvas = require('@napi-rs/canvas');
+Object.assign(globalThis, {
+  DOMMatrix: globalThis.DOMMatrix || ticketCanvas.DOMMatrix,
+  ImageData: globalThis.ImageData || ticketCanvas.ImageData,
+  Path2D: globalThis.Path2D || ticketCanvas.Path2D
+});
+const ticketLayoutVersion = 4;
 const { createDatabase } = require('./database');
 
 const root = __dirname;
-const dataDir = path.resolve(process.env.SAFAR_KAABE_DATA_DIR || path.join(root, 'data'));
+const defaultDataDirectory = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'safar-kaabe-data')
+  : path.join(root, 'data');
+const dataDir = path.resolve(process.env.SAFAR_KAABE_DATA_DIR || defaultDataDirectory);
 const db = createDatabase({ dataDir });
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || '0.0.0.0';
@@ -24,6 +38,11 @@ const maxCatalogImageRequestBytes = 380_000;
 const passwordResetSender = process.env.SMTP_FROM || 'engjoseph250@gmail.com';
 const catalogEventSubscribers = new Set();
 const catalogRealtimeSupported = !process.env.VERCEL && !process.env.VERCEL_ENV;
+const notificationEventSubscribers = new Map();
+const webPushConfigured = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
+if (webPushConfigured) {
+  webPush.setVapidDetails(process.env.VAPID_SUBJECT, process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+}
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.jpeg': 'image/jpeg',
@@ -88,7 +107,8 @@ const schema = `
     financials_json TEXT NOT NULL,
     seat_count INTEGER NOT NULL DEFAULT 1 CHECK (seat_count > 0),
     travel_date TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS waafi_payments (
     id TEXT PRIMARY KEY,
@@ -187,6 +207,91 @@ const schema = `
     message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    recipient_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    agency_id TEXT REFERENCES agencies(id) ON DELETE CASCADE,
+    booking_id TEXT REFERENCES bookings(id) ON DELETE CASCADE,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    href TEXT,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS notifications_recipient_idx ON notifications(recipient_user_id, read_at, created_at);
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    subscription_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    sound_enabled INTEGER NOT NULL DEFAULT 1,
+    desktop_push_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS booking_documents (
+    id TEXT PRIMARY KEY,
+    booking_id TEXT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    traveler_id TEXT,
+    agency_id TEXT,
+    document_type TEXT NOT NULL CHECK (document_type IN ('BOOKING_CONFIRMATION', 'AIRLINE_ETICKET')),
+    status TEXT NOT NULL CHECK (status IN ('PROCESSING', 'READY', 'FAILED')),
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+    storage_provider TEXT NOT NULL DEFAULT 'DATABASE',
+    pdf_storage_path TEXT,
+    jpg_storage_path TEXT,
+    document_reference TEXT,
+    document_version INTEGER NOT NULL DEFAULT 1,
+    layout_version INTEGER NOT NULL DEFAULT 1,
+    source_hash TEXT,
+    pdf_data TEXT,
+    jpg_data TEXT,
+    jpg_file_name TEXT,
+    document_hash TEXT,
+    verification_token_hash TEXT NOT NULL,
+    error_message TEXT,
+    email_delivery_status TEXT,
+    email_sent_at TEXT,
+    issued_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (booking_id, document_type)
+  );
+  CREATE INDEX IF NOT EXISTS booking_documents_booking_idx ON booking_documents(booking_id, status);
+  CREATE TABLE IF NOT EXISTS booking_document_versions (
+    document_id TEXT NOT NULL REFERENCES booking_documents(id) ON DELETE CASCADE,
+    booking_id TEXT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    document_reference TEXT NOT NULL,
+    document_version INTEGER NOT NULL,
+    verification_token_hash TEXT NOT NULL,
+    document_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'SUPERSEDED',
+    issued_at TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (document_id, document_version)
+  );
+  CREATE TABLE IF NOT EXISTS booking_document_deliveries (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES booking_documents(id) ON DELETE CASCADE,
+    recipient_email TEXT NOT NULL,
+    document_version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENT', 'FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (document_id, recipient_email)
+  );
+  CREATE INDEX IF NOT EXISTS booking_document_deliveries_document_idx ON booking_document_deliveries(document_id, status);
   CREATE TABLE IF NOT EXISTS chat_statuses (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -343,8 +448,8 @@ async function refreshWaafiPayment(referenceId) {
       .run(status, params.orderId ? String(params.orderId) : null, transactionId, updatedAt, payment.id);
     if (status !== 'APPROVED' || !payment.customerId) return;
 
-    await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED' WHERE id = ? AND state = 'PAYMENT_PENDING'")
-      .run(payment.bookingId);
+    await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED', updated_at = ? WHERE id = ? AND state = 'PAYMENT_PENDING'")
+      .run(updatedAt, payment.bookingId);
     const subject = `Booking ${payment.bookingReference} payment receipt`;
     let conversation = await db.prepare(`SELECT id FROM conversations
       WHERE agency_id = ? AND customer_id = ? AND subject = ?`).get(payment.agencyId, payment.customerId, subject);
@@ -435,6 +540,23 @@ async function initializeDatabase() {
     if (!bookingColumns.has('seat_count')) await db.exec('ALTER TABLE bookings ADD COLUMN seat_count INTEGER NOT NULL DEFAULT 1 CHECK (seat_count > 0)');
     if (!bookingColumns.has('offer_id')) await db.exec('ALTER TABLE bookings ADD COLUMN offer_id TEXT REFERENCES catalog_products(id) ON DELETE SET NULL');
     if (!bookingColumns.has('cancellation_reason')) await db.exec('ALTER TABLE bookings ADD COLUMN cancellation_reason TEXT');
+    if (!bookingColumns.has('updated_at')) await db.exec('ALTER TABLE bookings ADD COLUMN updated_at TEXT');
+    await db.exec("UPDATE bookings SET updated_at = COALESCE(updated_at, created_at) WHERE updated_at IS NULL");
+    const bookingDocumentColumns = new Set((await db.prepare('PRAGMA table_info(booking_documents)').all()).map(column => column.name));
+    for (const [column, definition] of [
+      ['traveler_id', 'TEXT'], ['agency_id', 'TEXT'], ['storage_provider', "TEXT NOT NULL DEFAULT 'DATABASE'"],
+      ['pdf_storage_path', 'TEXT'], ['jpg_storage_path', 'TEXT'], ['document_reference', 'TEXT'],
+      ['document_version', 'INTEGER NOT NULL DEFAULT 1'], ['layout_version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['source_hash', 'TEXT'], ['email_delivery_status', 'TEXT'],
+      ['email_sent_at', 'TEXT'], ['jpg_data', 'TEXT'], ['jpg_file_name', 'TEXT']
+    ]) {
+      if (!bookingDocumentColumns.has(column)) await db.exec(`ALTER TABLE booking_documents ADD COLUMN ${column} ${definition}`);
+    }
+    await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
+    const deliveryColumns = new Set((await db.prepare('PRAGMA table_info(booking_document_deliveries)').all()).map(column => column.name));
+    if (!deliveryColumns.has('document_version')) {
+      await db.exec('ALTER TABLE booking_document_deliveries ADD COLUMN document_version INTEGER NOT NULL DEFAULT 1');
+    }
   } else {
     await db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
@@ -454,6 +576,22 @@ async function initializeDatabase() {
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 1;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_id TEXT REFERENCES catalog_products(id) ON DELETE SET NULL;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS updated_at TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS traveler_id TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS agency_id TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS storage_provider TEXT NOT NULL DEFAULT 'DATABASE';
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS pdf_storage_path TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS jpg_storage_path TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS document_reference TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS document_version INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS layout_version INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS source_hash TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS email_delivery_status TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS email_sent_at TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS jpg_data TEXT;
+      ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS jpg_file_name TEXT;
+      ALTER TABLE booking_document_deliveries ADD COLUMN IF NOT EXISTS document_version INTEGER NOT NULL DEFAULT 1;
+      UPDATE bookings SET updated_at = COALESCE(updated_at, created_at) WHERE updated_at IS NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'AVAILABLE';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS typing_conversation_id TEXT;
@@ -465,6 +603,7 @@ async function initializeDatabase() {
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TEXT;
     `);
+    await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
   }
 
   await db.prepare(`
@@ -545,6 +684,32 @@ function sendChatAttachment(response, attachment) {
     'Content-Type': attachment.attachment_mime,
     'Content-Length': bytes.length,
     'Content-Disposition': 'inline',
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer'
+  });
+  response.end(bytes);
+}
+
+function sendPdf(response, pdfData, fileName, download = false) {
+  const bytes = Buffer.from(pdfData, 'base64');
+  response.writeHead(200, {
+    'Content-Type': 'application/pdf',
+    'Content-Length': bytes.length,
+    'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${fileName.replace(/[^a-z0-9._-]/gi, '_')}"`,
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer'
+  });
+  response.end(bytes);
+}
+
+function sendJpg(response, jpgData, fileName, download = false) {
+  const bytes = Buffer.from(jpgData, 'base64');
+  response.writeHead(200, {
+    'Content-Type': 'image/jpeg',
+    'Content-Length': bytes.length,
+    'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${fileName.replace(/[^a-z0-9._-]/gi, '_')}"`,
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer'
@@ -745,6 +910,619 @@ async function getAccessibleConversation(id, user) {
   return null;
 }
 
+function notificationPublic(record) {
+  return {
+    id: record.id,
+    recipientUserId: record.recipient_user_id || record.recipientUserId,
+    agencyId: record.agency_id || record.agencyId || null,
+    bookingId: record.booking_id || record.bookingId || null,
+    conversationId: record.conversation_id || record.conversationId || null,
+    type: record.type,
+    title: record.title,
+    body: record.body,
+    href: record.href || null,
+    createdAt: record.created_at || record.createdAt,
+    readAt: record.read_at || record.readAt || null
+  };
+}
+
+function publishNotification(userId, notification) {
+  const clients = notificationEventSubscribers.get(userId);
+  if (!clients) return;
+  const payload = `event: notification\ndata: ${JSON.stringify(notification)}\n\n`;
+  for (const client of [...clients]) {
+    try { client.write(payload); } catch { clients.delete(client); }
+  }
+  if (clients.size === 0) notificationEventSubscribers.delete(userId);
+}
+
+async function deliverWebPush(userId, notification) {
+  if (!webPushConfigured) return;
+  const preferences = await db.prepare('SELECT desktop_push_enabled FROM notification_preferences WHERE user_id = ?').get(userId);
+  if (preferences && Number(preferences.desktop_push_enabled) === 0) return;
+  const subscriptions = await db.prepare('SELECT endpoint, subscription_json FROM push_subscriptions WHERE user_id = ?').all(userId);
+  for (const subscription of subscriptions) {
+    try {
+      await webPush.sendNotification(JSON.parse(subscription.subscription_json), JSON.stringify({
+        title: notification.title,
+        body: notification.body,
+        url: notification.href || '/',
+        notificationId: notification.id
+      }));
+    } catch (error) {
+      if (error?.statusCode === 404 || error?.statusCode === 410) {
+        await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(subscription.endpoint);
+      } else {
+        console.warn('Web push delivery failed:', error.message);
+      }
+    }
+  }
+}
+
+async function createConversationMessageNotifications(conversation, sender, message) {
+  const recipients = conversation.customer_id && sender.id !== conversation.customer_id
+    ? [{ id: conversation.customer_id }]
+    : await db.prepare("SELECT id FROM users WHERE agency_id = ? AND role = 'AGENCY' AND id <> ?").all(conversation.agency_id, sender.id);
+  const created = [];
+  for (const recipient of recipients) {
+    const notification = {
+      id: crypto.randomUUID(), recipientUserId: recipient.id, agencyId: conversation.agency_id,
+      bookingId: null, conversationId: conversation.id, type: 'MESSAGE', title: `New message from ${sender.name}`,
+      body: `${message.body}`.slice(0, 220), href: `/?conversation=${encodeURIComponent(conversation.id)}`,
+      createdAt: message.createdAt, readAt: null, dedupeKey: `MESSAGE:${message.id}:${recipient.id}`
+    };
+    const inserted = await db.prepare(`
+      INSERT INTO notifications (id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (dedupe_key) DO NOTHING
+    `).run(notification.id, notification.recipientUserId, notification.agencyId, notification.bookingId, notification.conversationId,
+      notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
+    if (inserted.changes === 1) created.push(notification);
+  }
+  for (const notification of created) {
+    publishNotification(notification.recipientUserId, notification);
+    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push message notification failed:', error.message));
+  }
+}
+
+function createPdfBuffer(booking, qrBuffer, issuedAt, documentReference) {
+  return new Promise((resolve, reject) => {
+    const document = new PDFDocument({
+      size: [792, 310],
+      margin: 0,
+      info: { Title: 'SAFAR KAABE Booking Confirmation', Author: 'SAFAR KAABE' }
+    });
+    const chunks = [];
+    document.on('data', chunk => chunks.push(chunk));
+    document.on('end', () => resolve(Buffer.concat(chunks)));
+    document.on('error', reject);
+    try {
+      const navy = '#202f7d';
+      const ink = '#161923';
+      const muted = '#687087';
+      const compact = (value, limit) => {
+        const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+        return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
+      };
+      const route = String(booking.routeBadge || booking.destination || 'Route unavailable').replace(/\s+/g, ' ').trim();
+      const routeParts = route.split(/\s*(?:→|->|–|—)\s*/).map(part => part.trim().toUpperCase());
+      const hasRouteCodes = routeParts.length === 2 && routeParts.every(part => /^[A-Z]{3}$/.test(part));
+      const origin = hasRouteCodes ? routeParts[0] : route;
+      const destination = hasRouteCodes ? routeParts[1] : null;
+      const passenger = String(booking.travelerName || 'Traveler').replace(/\s+/g, ' ').trim();
+      const provider = String(booking.supplierName || booking.offerTitle || 'Not listed').replace(/\s+/g, ' ').trim();
+      const travelDate = String(booking.travelDate || 'Not confirmed').replace(/\s+/g, ' ').trim();
+      const bookingReference = String(booking.reference || 'Unavailable').replace(/\s+/g, ' ').trim();
+      const platformReference = String(booking.pnr || 'Not assigned').replace(/\s+/g, ' ').trim();
+      const travelers = `${Math.max(1, Number(booking.seatCount) || 1)} ${Number(booking.seatCount) === 1 ? 'TRAVELER' : 'TRAVELERS'}`;
+      const tripDetails = [
+        booking.offerTitle && booking.offerTitle !== provider ? booking.offerTitle : null,
+        booking.specs,
+        booking.baggage && `Baggage: ${booking.baggage}`
+      ].filter(Boolean).join(' | ') || 'Additional trip details not provided';
+      const issuedTimestamp = `${String(issuedAt).replace('T', ' ').slice(0, 16)} UTC`;
+      const drawText = (value, x, y, options = {}) => {
+        document
+          .fillColor(options.color || ink)
+          .font(options.bold ? 'Helvetica-Bold' : 'Helvetica')
+          .fontSize(options.size || 10)
+          .text(String(value ?? ''), x, y, {
+            width: options.width,
+            align: options.align || 'left',
+            lineBreak: false,
+            ellipsis: true,
+            characterSpacing: options.characterSpacing || 0
+          });
+      };
+      const drawBox = (x, y, width, label, value, valueSize = 15) => {
+        document.roundedRect(x, y, width, 51, 5).lineWidth(1.5).strokeColor(navy).fillAndStroke('#ffffff', navy);
+        drawText(label, x + 5, y + 7, { size: 7.5, color: muted, bold: true, width: width - 10, align: 'center' });
+        drawText(value, x + 5, y + 23, { size: valueSize, color: navy, bold: true, width: width - 10, align: 'center' });
+      };
+
+      document.save();
+      document.roundedRect(1, 1, 790, 308, 14).clip();
+      document.rect(0, 0, 792, 310).fill('#ffffff');
+      document.rect(0, 0, 792, 46).fill(navy);
+      document.rect(568, 46, 224, 242).fill('#f3f5fc');
+      document.rect(0, 288, 792, 22).fill(navy);
+
+      document.roundedRect(19, 7, 32, 32, 6).fill('#ffffff');
+      const logo = ticketLogoBuffer(booking);
+      if (logo) document.image(logo, 19, 7, { fit: [32, 32], align: 'center', valign: 'center' });
+      else drawText('SK', 22, 12, { size: 20, color: navy, bold: true, width: 27, align: 'center' });
+      drawText('SAFAR KAABE', 59, 8, { size: 20, color: '#ffffff', bold: true, width: 240 });
+      drawText('TRAVEL BOOKING CONFIRMATION', 60, 30, { size: 7.5, color: '#dce4ff', bold: true, width: 280, characterSpacing: 0.7 });
+      drawText('BOOKING CONFIRMATION', 326, 9, { size: 13, color: '#ffffff', bold: true, width: 226, align: 'right' });
+      drawText('NOT AN AIRLINE BOARDING PASS', 326, 29, { size: 7.5, color: '#dce4ff', width: 226, align: 'right' });
+
+      document.moveTo(568, 49).lineTo(568, 286).dash(4, { space: 4 }).strokeColor('#8f98b7').lineWidth(1).stroke().undash();
+      document.circle(568, 46, 7).fill('#ffffff');
+      document.circle(570, 288, 8).fill('#ffffff');
+
+      drawText('PASSENGER', 24, 57, { size: 7.5, color: muted, bold: true, width: 100 });
+      drawText(compact(passenger, 46), 24, 69, { size: 17, bold: true, width: 520 });
+      drawText(`ISSUING AGENCY  |  ${compact(booking.agencyName || 'Travel agency', 32)}`, 24, 91, { size: 8, color: muted, width: 260 });
+      drawText(`TRAVEL PROVIDER  |  ${compact(provider, 31)}`, 292, 91, { size: 8, color: muted, width: 260 });
+      if (hasRouteCodes) {
+        drawText(origin, 25, 108, { size: 31, bold: true, width: 130 });
+        document.moveTo(202, 126).lineTo(236, 126).lineWidth(2.5).strokeColor(navy).stroke();
+        document.moveTo(229, 121).lineTo(236, 126).lineTo(229, 131).lineWidth(2.5).strokeColor(navy).stroke();
+        drawText(destination, 260, 108, { size: 31, bold: true, width: 130 });
+        drawText('ORIGIN', 27, 141, { size: 7, color: muted, width: 100 });
+        drawText('DESTINATION', 262, 141, { size: 7, color: muted, width: 120 });
+      } else {
+        drawText(compact(route, 70), 25, 113, { size: 20, bold: true, width: 500 });
+        drawText('CONFIRMED ITINERARY', 27, 141, { size: 7, color: muted, width: 150 });
+      }
+
+      drawBox(24, 157, 164, 'BOOKING REFERENCE', compact(bookingReference, 18), 12);
+      drawBox(200, 157, 164, 'CONFIRMED TRAVEL DATE', compact(travelDate, 18), 11);
+      drawBox(376, 157, 164, 'TRAVELERS', travelers, 11);
+      drawText('TRIP DETAILS', 25, 221, { size: 7, color: muted, bold: true, width: 100 });
+      drawText(compact(tripDetails, 74), 25, 233, { size: 8, width: 516 });
+      drawText('PLATFORM REQUEST  |  INTERNAL REFERENCE', 25, 255, { size: 6.5, color: muted, bold: true, width: 220 });
+      drawText(compact(platformReference, 24), 25, 267, { size: 8, bold: true, width: 180 });
+      drawText(`ISSUED  |  ${issuedTimestamp}`, 313, 267, { size: 7, color: muted, width: 220 });
+
+      drawText('TRAVEL VOUCHER', 586, 57, { size: 9, color: navy, bold: true, width: 190 });
+      drawText('PASSENGER', 586, 76, { size: 7, color: muted, bold: true, width: 190 });
+      drawText(compact(passenger, 28), 586, 89, { size: 10, bold: true, width: 190 });
+      drawText('CONFIRMED ROUTE', 586, 110, { size: 7, color: muted, bold: true, width: 190 });
+      drawText(compact(route, 30), 586, 123, { size: 12, color: navy, bold: true, width: 190 });
+      drawText(compact(travelDate, 24), 586, 143, { size: 8, color: muted, width: 190 });
+      drawText('DOCUMENT REFERENCE', 586, 165, { size: 7, color: muted, bold: true, width: 190 });
+      drawText(compact(documentReference, 26), 586, 178, { size: 8, bold: true, width: 190 });
+      document.roundedRect(656, 194, 60, 60, 4).fill('#ffffff');
+      document.image(qrBuffer, 660, 198, { fit: [52, 52] });
+      drawText('SCAN TO VERIFY', 640, 259, { size: 6.5, color: muted, bold: true, width: 92, align: 'center' });
+      drawText('Internal verification only', 620, 272, { size: 6, color: muted, width: 132, align: 'center' });
+
+      drawText('Only confirmed booking details are shown. Not valid for boarding.', 24, 294, { size: 7, color: '#ffffff', bold: true, width: 520 });
+      drawText('SAFAR KAABE BOOKING CONFIRMATION', 586, 294, { size: 6.5, color: '#ffffff', bold: true, width: 190 });
+      document.restore();
+      document.roundedRect(1, 1, 790, 308, 14).lineWidth(1.5).strokeColor('#c7cde0').stroke();
+      document.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function escapeXml(value) {
+  return String(value ?? 'Unavailable').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]);
+}
+
+async function createTicketJpgBuffer(pdfBuffer) {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjsEntry = require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
+  const standardFontDataUrl = `${path.resolve(path.dirname(pdfjsEntry), '..', '..', 'standard_fonts').split(path.sep).join('/')}/`;
+  const loadingTask = getDocument({
+    data: new Uint8Array(pdfBuffer),
+    standardFontDataUrl,
+    useWasm: false
+  });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+  try {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 300 / 72 });
+      const canvas = ticketCanvas.createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      pages.push({
+        buffer: canvas.toBuffer('image/jpeg', 92),
+        width: canvas.width,
+        height: canvas.height
+      });
+      page.cleanup();
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
+  if (!pages.length) throw new Error('PDF rendering did not produce any ticket pages.');
+  if (pages.length === 1) return sharp(pages[0].buffer).jpeg({ quality: 92, chromaSubsampling: '4:4:4' }).toBuffer();
+  const width = Math.max(...pages.map(page => page.width));
+  const height = pages.reduce((total, page) => total + page.height, 0);
+  let top = 0;
+  const layers = pages.map(page => {
+    const layer = { input: page.buffer, left: 0, top };
+    top += page.height;
+    return layer;
+  });
+  return sharp({ create: { width, height, channels: 3, background: '#ffffff' } })
+    .composite(layers)
+    .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
+    .toBuffer();
+}
+
+function ticketDocumentPublic(document, origin) {
+  const bookingId = document.booking_id || document.bookingId;
+  const baseUrl = origin ? new URL(origin).origin : '';
+  const pdfPath = `/api/bookings/${encodeURIComponent(bookingId)}/ticket.pdf`;
+  const jpgPath = `/api/bookings/${encodeURIComponent(bookingId)}/ticket.jpg`;
+  return {
+    id: document.id,
+    bookingId,
+    documentReference: document.document_reference || document.documentReference || null,
+    version: Number(document.document_version || document.documentVersion || 1),
+    documentType: document.document_type || document.documentType,
+    status: document.status,
+    fileName: document.file_name || document.fileName,
+    mimeType: document.mime_type || document.mimeType || 'application/pdf',
+    issuedAt: document.issued_at || document.issuedAt || null,
+    previewUrl: `${baseUrl}${pdfPath}`,
+    downloadUrl: `${baseUrl}${pdfPath}?download=1`,
+    jpgPreviewUrl: `${baseUrl}${jpgPath}`,
+    jpgDownloadUrl: `${baseUrl}${jpgPath}?download=1`,
+    jpgFileName: document.jpg_file_name || document.jpgFileName || `${(document.file_name || document.fileName || 'SAFAR-KAABE-ticket').replace(/\.pdf$/i, '')}.jpg`,
+    emailDeliveryStatus: document.emailDeliveryStatus || document.email_delivery_status || null,
+    emailSentAt: document.emailSentAt || document.email_sent_at || null
+  };
+}
+
+function requestOrigin(request) {
+  const forwardedHost = request.headers['x-forwarded-host'];
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) || request.headers.host;
+  if (typeof host !== 'string' || !/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(host)) {
+    throw Object.assign(new Error('Could not determine a safe public origin for this ticket request.'), { statusCode: 400 });
+  }
+  const forwardedProtocol = request.headers['x-forwarded-proto'];
+  const protocol = process.env.VERCEL || request.socket.encrypted || forwardedProtocol === 'https' ? 'https' : 'http';
+  return new URL(`${protocol}://${host}`).origin;
+}
+
+async function createTicketReadyNotification(booking, document) {
+  if (!booking.customerId) return;
+  const notification = {
+    id: crypto.randomUUID(), recipientUserId: booking.customerId, agencyId: booking.agencyId,
+    bookingId: booking.id, conversationId: null, type: 'TICKET_READY', title: 'Booking confirmation ready',
+    body: `Your approved booking ${booking.reference} is ready to view and download.`,
+    href: `/?booking=${encodeURIComponent(booking.id)}`, createdAt: document.issued_at || nowIso(), readAt: null,
+    dedupeKey: `TICKET_READY:${booking.id}:${document.id}`
+  };
+  const inserted = await db.prepare(`
+    INSERT INTO notifications (id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (dedupe_key) DO NOTHING
+  `).run(notification.id, notification.recipientUserId, notification.agencyId, notification.bookingId, notification.conversationId,
+    notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
+  if (inserted.changes === 1) {
+    publishNotification(notification.recipientUserId, notification);
+    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Ticket notification failed:', error.message));
+  }
+}
+
+function ticketLogoBuffer(booking) {
+  if (!booking.agencyLogoData || !['image/png', 'image/jpeg'].includes(booking.agencyLogoMime)) return null;
+  const logo = Buffer.from(booking.agencyLogoData, 'base64');
+  const validPng = booking.agencyLogoMime === 'image/png' && logo.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const validJpeg = booking.agencyLogoMime === 'image/jpeg' && logo.length > 3 && logo[0] === 0xff && logo[1] === 0xd8 && logo.at(-2) === 0xff && logo.at(-1) === 0xd9;
+  if (!validPng && !validJpeg) {
+    console.warn(`Ticket branding image is invalid for agency ${booking.agencyId}; using the SAFAR KAABE fallback mark.`);
+    return null;
+  }
+  return logo;
+}
+
+async function deliverTicketReadyEmail(booking, document, origin) {
+  const recipientEmail = booking.travelerEmail;
+  if (!recipientEmail) {
+    const reason = 'No traveler email is recorded for this booking.';
+    await db.prepare('UPDATE booking_documents SET email_delivery_status = ?, email_sent_at = NULL, updated_at = ? WHERE id = ?')
+      .run('FAILED', nowIso(), document.id);
+    return { status: 'FAILED', error: reason };
+  }
+  const now = nowIso();
+  const deliveryId = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const reservation = await db.prepare(`
+    INSERT INTO booking_document_deliveries (id, document_id, recipient_email, document_version, status, attempts, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'PENDING', 1, ?, ?)
+    ON CONFLICT (document_id, recipient_email) DO UPDATE
+      SET status = 'PENDING', attempts = booking_document_deliveries.attempts + 1,
+          document_version = excluded.document_version, last_error = NULL, updated_at = excluded.updated_at
+      WHERE booking_document_deliveries.status = 'FAILED'
+        OR (booking_document_deliveries.status = 'PENDING' AND booking_document_deliveries.updated_at < ?)
+        OR booking_document_deliveries.document_version < excluded.document_version
+  `).run(deliveryId, document.id, recipientEmail, Number(document.document_version || 1), now, now, staleBefore);
+  const delivery = await db.prepare('SELECT * FROM booking_document_deliveries WHERE document_id = ? AND recipient_email = ?')
+    .get(document.id, recipientEmail);
+  if (delivery?.status === 'SENT') return { status: 'SENT', sentAt: delivery.sent_at };
+  if (!reservation.changes && delivery?.status === 'PENDING') return { status: 'PENDING' };
+  await db.prepare('UPDATE booking_documents SET email_delivery_status = ?, updated_at = ? WHERE id = ?')
+    .run('PENDING', now, document.id);
+  try {
+    const transport = passwordResetTransport();
+    if (!transport) throw new Error('SMTP is not configured; the document is ready in My Trips & Vouchers.');
+    const baseUrl = new URL(origin).origin;
+    const previewUrl = `${baseUrl}/?booking=${encodeURIComponent(booking.id)}`;
+    const pdfUrl = `${baseUrl}/api/bookings/${encodeURIComponent(booking.id)}/ticket.pdf?download=1`;
+    const jpgUrl = `${baseUrl}/api/bookings/${encodeURIComponent(booking.id)}/ticket.jpg?download=1`;
+    const pdfBytes = Buffer.from(document.pdf_data, 'base64');
+    const jpgBytes = document.jpg_data ? Buffer.from(document.jpg_data, 'base64') : null;
+    const logo = ticketLogoBuffer(booking);
+    const logoDataUrl = logo ? `data:${booking.agencyLogoMime};base64,${logo.toString('base64')}` : '';
+    const itinerary = booking.routeBadge || booking.destination;
+    const issueDate = document.issued_at || now;
+    await transport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: recipientEmail,
+      subject: `SAFAR KAABE booking confirmation ${booking.reference}`,
+      text: `Your SAFAR KAABE booking confirmation ${booking.reference} from ${booking.agencyName} is ready. Passenger: ${booking.travelerName}. Route: ${itinerary}. Travel date: ${booking.travelDate}. Preview: ${previewUrl}. PDF: ${pdfUrl}. JPG: ${jpgUrl}. Sign in to access your documents.`,
+      html: `<div style="font-family:Arial,sans-serif;color:#101b32;max-width:640px">${logoDataUrl ? `<img src="${logoDataUrl}" alt="${escapeXml(booking.agencyName)}" width="96" style="max-height:64px;object-fit:contain">` : ''}<h2>SAFAR KAABE booking confirmation</h2><p>Your approved booking <strong>${escapeXml(booking.reference)}</strong> from <strong>${escapeXml(booking.agencyName)}</strong> is ready.</p><p><strong>Passenger:</strong> ${escapeXml(booking.travelerName)}<br><strong>Route:</strong> ${escapeXml(itinerary)}<br><strong>Travel date:</strong> ${escapeXml(booking.travelDate)}<br><strong>Agency contact:</strong> ${escapeXml(booking.agencyEmail || booking.agencyPhone || 'Not available')}<br><strong>Issued:</strong> ${escapeXml(issueDate)}</p><p><a href="${escapeXml(previewUrl)}">My Trips & Vouchers</a> (sign-in required)</p><p><a href="${escapeXml(pdfUrl)}">Secure PDF download</a> · <a href="${escapeXml(jpgUrl)}">Secure JPG download</a> (sign-in required)</p><p>This is an agency booking confirmation, not an airline e-ticket unless airline issuance has been separately verified.</p></div>`,
+      attachments: [
+        { filename: document.file_name, content: pdfBytes, contentType: 'application/pdf' },
+        ...(jpgBytes && jpgBytes.length <= 5_000_000 ? [{ filename: document.jpg_file_name, content: jpgBytes, contentType: 'image/jpeg' }] : [])
+      ]
+    });
+    const sentAt = nowIso();
+    await db.prepare('UPDATE booking_document_deliveries SET status = \'SENT\', sent_at = ?, updated_at = ?, last_error = NULL WHERE document_id = ? AND recipient_email = ?')
+      .run(sentAt, sentAt, document.id, recipientEmail);
+    await db.prepare('UPDATE booking_documents SET email_delivery_status = ?, email_sent_at = ?, updated_at = ? WHERE id = ?')
+      .run('SENT', sentAt, sentAt, document.id);
+    return { status: 'SENT', sentAt };
+  } catch (error) {
+    const message = String(error?.message || error).slice(0, 500);
+    const failedAt = nowIso();
+    await db.prepare('UPDATE booking_document_deliveries SET status = \'FAILED\', last_error = ?, updated_at = ? WHERE document_id = ? AND recipient_email = ?')
+      .run(message, failedAt, document.id, recipientEmail);
+    await db.prepare('UPDATE booking_documents SET email_delivery_status = ?, email_sent_at = NULL, updated_at = ? WHERE id = ?')
+      .run('FAILED', failedAt, document.id);
+    console.error(`Ticket email delivery failed for booking ${booking.id}, document ${document.id}:`, error);
+    return { status: 'FAILED', error: message };
+  }
+}
+
+function ticketSourceHash(booking) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    ticketLayoutVersion,
+    bookingId: booking.id,
+    reference: booking.reference,
+    requestNumber: booking.pnr,
+    travelerName: booking.travelerName,
+    travelerEmail: booking.travelerEmail,
+    travelerPhone: booking.phone,
+    travelerCount: booking.seatCount,
+    agencyId: booking.agencyId,
+    agencyName: booking.agencyName,
+    agencyPhone: booking.agencyPhone,
+    agencyEmail: booking.agencyEmail,
+    agencyLogoMime: booking.agencyLogoMime,
+    agencyLogoData: booking.agencyLogoData,
+    offerTitle: booking.offerTitle,
+    route: booking.routeBadge || booking.destination,
+    travelDate: booking.travelDate,
+    supplierName: booking.supplierName,
+    supplierRef: booking.supplierRef,
+    category: booking.category,
+    baggage: booking.baggage,
+    specs: booking.specs
+  })).digest('hex');
+}
+
+async function isValidStoredTicket(document) {
+  if (!document?.pdf_data || !document.jpg_data) return false;
+  const pdf = Buffer.from(document.pdf_data, 'base64');
+  if (pdf.length < 16 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-' || !pdf.toString('latin1').includes('%%EOF')) return false;
+  try {
+    const metadata = await sharp(Buffer.from(document.jpg_data, 'base64')).metadata();
+    return metadata.format === 'jpeg' && metadata.width > 0 && metadata.height > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureBookingTicketDocument(bookingId, origin) {
+  const booking = await db.prepare(`
+    SELECT b.id, b.reference, b.pnr, b.agency_id AS agencyId, b.offer_id AS offerId, b.customer_id AS customerId,
+           b.traveler_name AS travelerName, b.traveler_email AS travelerEmail, b.phone, b.offer_title AS offerTitle,
+           b.state, b.travel_date AS travelDate, b.seat_count AS seatCount, b.created_at AS createdAtUtc,
+           a.name AS agencyName, a.logo_mime AS agencyLogoMime, a.logo_data AS agencyLogoData,
+           (SELECT email FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyEmail,
+           (SELECT phone FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyPhone,
+           c.route_badge AS routeBadge, c.destination, c.category, c.supplier_name AS supplierName, c.supplier_ref AS supplierRef,
+           c.baggage, c.specs
+    FROM bookings b JOIN agencies a ON a.id = b.agency_id
+    LEFT JOIN catalog_products c ON c.id = b.offer_id
+    WHERE b.id = ?
+  `).get(bookingId);
+  if (!booking) throw Object.assign(new Error('Booking not found.'), { statusCode: 404 });
+  if (booking.state !== 'ACCEPTED') throw Object.assign(new Error('A ticket confirmation is available only after agency approval.'), { statusCode: 409 });
+  let existing = await db.prepare("SELECT * FROM booking_documents WHERE booking_id = ? AND document_type = 'BOOKING_CONFIRMATION'").get(bookingId);
+  const missingDetails = [
+    !booking.travelerName && 'passenger name',
+    !booking.reference && 'booking reference',
+    !booking.offerTitle && 'trip name',
+    !booking.agencyName && 'issuing agency',
+    !booking.travelDate && 'confirmed travel date',
+    !(booking.routeBadge || booking.destination) && 'trip route'
+  ].filter(Boolean);
+  if (missingDetails.length) {
+    const message = `Ticket generation needs the following booking details: ${missingDetails.join(', ')}. Update the booking details before retrying.`;
+    if (existing?.status === 'PROCESSING' && Date.now() - Date.parse(existing.updated_at || 0) < 5 * 60 * 1000) {
+      throw Object.assign(new Error('The booking confirmation is already being generated. Please try again shortly.'), { statusCode: 409 });
+    }
+    if (existing?.status === 'READY') {
+      await db.prepare('UPDATE booking_documents SET error_message = ?, updated_at = ? WHERE id = ? AND status = \'READY\'')
+        .run(message, nowIso(), existing.id);
+    } else {
+      const now = nowIso();
+      const safeReference = String(booking.reference || bookingId).replace(/[^a-z0-9_-]/gi, '_');
+      await db.prepare(`
+        INSERT INTO booking_documents (
+          id, booking_id, traveler_id, agency_id, document_type, status, file_name,
+          verification_token_hash, error_message, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'BOOKING_CONFIRMATION', 'FAILED', ?, ?, ?, ?, ?)
+        ON CONFLICT (booking_id, document_type) DO UPDATE SET
+          status = 'FAILED', error_message = excluded.error_message, updated_at = excluded.updated_at
+        WHERE booking_documents.status <> 'READY'
+      `).run(existing?.id || crypto.randomUUID(), bookingId, booking.customerId, booking.agencyId,
+        `SAFAR-KAABE-Booking-Voucher-${safeReference}.pdf`, crypto.createHash('sha256').update(crypto.randomBytes(24)).digest('hex'),
+        message, existing?.created_at || now, now);
+    }
+    console.warn(`Ticket generation validation failed for booking ${bookingId}: ${message}`);
+    throw Object.assign(new Error(message), { statusCode: 409 });
+  }
+  const sourceHash = ticketSourceHash(booking);
+  if (existing?.status === 'READY' && existing.source_hash === sourceHash && await isValidStoredTicket(existing)) {
+    const email = await deliverTicketReadyEmail(booking, existing, origin);
+    return { booking, document: ticketDocumentPublic(existing, origin), email };
+  }
+  const originalDocument = existing?.status === 'READY' ? existing : null;
+  const documentId = existing?.id || crypto.randomUUID();
+  const verificationToken = crypto.randomBytes(24).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(verificationToken).digest('hex');
+  let savedDocument = null;
+  const now = nowIso();
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const safeReference = String(booking.reference).replace(/[^a-z0-9_-]/gi, '_');
+  if (existing?.status === 'READY') {
+    await db.prepare(`
+      INSERT INTO booking_document_versions (
+        document_id, booking_id, document_reference, document_version, verification_token_hash,
+        document_hash, status, issued_at, created_at
+      )
+      SELECT id, booking_id, document_reference, document_version, verification_token_hash,
+             document_hash, 'SUPERSEDED', issued_at, ?
+      FROM booking_documents WHERE id = ? AND status = 'READY'
+      ON CONFLICT (document_id, document_version) DO NOTHING
+    `).run(now, existing.id);
+  }
+  const reservation = await db.prepare(`
+    INSERT INTO booking_documents (
+      id, booking_id, traveler_id, agency_id, document_type, status, file_name, mime_type,
+      storage_provider, document_reference, document_version, source_hash, verification_token_hash, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, 'BOOKING_CONFIRMATION', 'PROCESSING', ?, 'application/pdf',
+      'DATABASE', ?, 1, ?, ?, ?, ?)
+    ON CONFLICT (booking_id, document_type) DO UPDATE SET
+      status = 'PROCESSING',
+      traveler_id = excluded.traveler_id,
+      agency_id = excluded.agency_id,
+      file_name = excluded.file_name,
+      document_reference = CASE WHEN booking_documents.source_hash IS DISTINCT FROM excluded.source_hash
+        THEN excluded.document_reference ELSE booking_documents.document_reference END,
+      document_version = CASE WHEN booking_documents.status = 'READY'
+        THEN booking_documents.document_version + 1 ELSE booking_documents.document_version END,
+      source_hash = excluded.source_hash,
+      verification_token_hash = excluded.verification_token_hash,
+      error_message = NULL,
+      pdf_data = NULL,
+      jpg_data = NULL,
+      jpg_file_name = NULL,
+      pdf_storage_path = NULL,
+      jpg_storage_path = NULL,
+      document_hash = NULL,
+      updated_at = excluded.updated_at
+    WHERE booking_documents.status <> 'PROCESSING' OR booking_documents.updated_at < ?
+  `).run(documentId, bookingId, booking.customerId, booking.agencyId, `SAFAR-KAABE-Booking-Voucher-${safeReference}.pdf`,
+    `SK-${safeReference}-V1`, sourceHash, tokenHash, existing?.created_at || now, now, staleBefore);
+  existing = await db.prepare("SELECT * FROM booking_documents WHERE booking_id = ? AND document_type = 'BOOKING_CONFIRMATION'").get(bookingId);
+  if (!reservation.changes) {
+    if (existing?.status === 'READY' && existing.source_hash === sourceHash && await isValidStoredTicket(existing)) {
+      const email = await deliverTicketReadyEmail(booking, existing, origin);
+      return { booking, document: ticketDocumentPublic(existing, origin), email };
+    }
+    throw Object.assign(new Error('The booking confirmation is already being generated. Please try again shortly.'), { statusCode: 409 });
+  }
+  const documentVersion = Number(existing.document_version || 1);
+  const documentReference = `SK-${safeReference}-V${documentVersion}`;
+  try {
+    const verificationUrl = `${origin}/api/tickets/${encodeURIComponent(documentId)}/verify?token=${encodeURIComponent(verificationToken)}`;
+    const qrDataUrl = await QRCode.toDataURL(verificationUrl, { errorCorrectionLevel: 'M', margin: 1, width: 180 });
+    const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
+    const issuedAt = nowIso();
+    const pdf = await createPdfBuffer(booking, qrBuffer, issuedAt, documentReference);
+    if (pdf.length < 100 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-' || !pdf.toString('latin1').includes('%%EOF')) {
+      throw new Error('PDF rendering returned an invalid or incomplete PDF file.');
+    }
+    const jpg = await createTicketJpgBuffer(pdf);
+    const jpgMetadata = await sharp(jpg).metadata();
+    if (jpgMetadata.format !== 'jpeg' || jpgMetadata.width < 1200 || jpgMetadata.height < 700) {
+      throw new Error('Ticket image rendering returned an invalid or low-resolution JPEG.');
+    }
+    const base64 = pdf.toString('base64');
+    const jpgBase64 = jpg.toString('base64');
+    const hash = crypto.createHash('sha256').update(pdf).digest('hex');
+    const pdfPath = `booking-documents/${booking.id}/v${documentVersion}/${documentReference}.pdf`;
+    const jpgFileName = `SAFAR-KAABE-Booking-Voucher-${safeReference}.jpg`;
+    const jpgPath = `booking-documents/${booking.id}/v${documentVersion}/${documentReference}.jpg`;
+    await db.prepare(`UPDATE booking_documents SET status = 'READY', storage_provider = 'DATABASE',
+      pdf_storage_path = ?, jpg_storage_path = ?, document_reference = ?, pdf_data = ?, jpg_data = ?,
+      jpg_file_name = ?, document_hash = ?, issued_at = ?, layout_version = ?, updated_at = ?, error_message = NULL
+      WHERE id = ? AND status = 'PROCESSING'`).run(pdfPath, jpgPath, documentReference, base64, jpgBase64, jpgFileName, hash, issuedAt, ticketLayoutVersion, issuedAt, documentId);
+    const ready = await db.prepare('SELECT * FROM booking_documents WHERE id = ?').get(documentId);
+    if (ready?.status !== 'READY') throw new Error('The generated ticket was not saved as a ready document.');
+    savedDocument = ready;
+    try {
+      await createTicketReadyNotification(booking, ready);
+    } catch (notificationError) {
+      console.error(`Ticket notification failed for booking ${bookingId}, document ${documentId}:`, notificationError);
+    }
+    const email = await deliverTicketReadyEmail(booking, ready, origin);
+    return { booking, document: ticketDocumentPublic(ready, origin), email };
+  } catch (error) {
+    const message = String(error.message || 'Unknown PDF generation error').slice(0, 500);
+    const failedAt = nowIso();
+    if (savedDocument) {
+      await db.prepare(`UPDATE booking_documents SET email_delivery_status = 'FAILED', email_sent_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'READY' AND document_version = ? AND COALESCE(email_delivery_status, '') <> 'SENT'`)
+        .run(failedAt, documentId, documentVersion);
+      const ready = await db.prepare('SELECT * FROM booking_documents WHERE id = ? AND status = \'READY\'').get(documentId);
+      console.error(`Ticket stored for booking ${bookingId}, but follow-up delivery failed for document ${documentId}:`, error);
+      if (ready) {
+        return {
+          booking,
+          document: ticketDocumentPublic(ready, origin),
+          email: { status: ready.email_delivery_status || 'FAILED', error: 'Ticket was saved, but email delivery could not be confirmed. Retry email delivery.' }
+        };
+      }
+    }
+    if (originalDocument) {
+      await db.prepare(`UPDATE booking_documents SET status = 'READY', file_name = ?, mime_type = ?,
+        storage_provider = ?, pdf_storage_path = ?, jpg_storage_path = ?, document_reference = ?,
+        document_version = ?, layout_version = ?, source_hash = ?, pdf_data = ?, jpg_data = ?, jpg_file_name = ?,
+        document_hash = ?, verification_token_hash = ?, error_message = ?, issued_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'PROCESSING'`).run(
+        originalDocument.file_name, originalDocument.mime_type, originalDocument.storage_provider,
+        originalDocument.pdf_storage_path, originalDocument.jpg_storage_path, originalDocument.document_reference,
+        originalDocument.document_version, originalDocument.layout_version || 1, originalDocument.source_hash, originalDocument.pdf_data,
+        originalDocument.jpg_data, originalDocument.jpg_file_name, originalDocument.document_hash,
+        originalDocument.verification_token_hash, message, originalDocument.issued_at, failedAt, documentId
+      );
+      await db.prepare('DELETE FROM booking_document_versions WHERE document_id = ? AND document_version = ?')
+        .run(documentId, originalDocument.document_version);
+    } else {
+      await db.prepare(`UPDATE booking_documents SET status = 'FAILED', error_message = ?, updated_at = ? WHERE id = ? AND status = 'PROCESSING'`)
+        .run(message, failedAt, documentId);
+    }
+    console.error(`Ticket generation failed for booking ${bookingId}, document ${documentId}, version ${documentVersion}:`, error);
+    throw Object.assign(new Error(`Ticket generation failed: ${message}`), { statusCode: 503, cause: error });
+  }
+}
+
 function conversationPeerPredicate(role) {
   if (role === 'CLIENT') return `((peer.role = 'AGENCY' AND peer.agency_id = c.agency_id) OR (c.agency_id IS NULL AND peer.role = 'SUPER_ADMIN'))`;
   if (role === 'AGENCY') return `(peer.id = c.customer_id OR (c.customer_id IS NULL AND peer.role = 'SUPER_ADMIN'))`;
@@ -931,6 +1709,14 @@ async function handleApi(request, response, url) {
     const status = { configured };
     if (process.env.VERCEL) status.setupTokenRequired = !configured;
     sendJson(response, 200, status);
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/app-version') {
+    const releaseId = process.env.VERCEL_DEPLOYMENT_ID ||
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      'local';
+    sendJson(response, 200, { releaseId });
     return;
   }
 
@@ -1198,8 +1984,222 @@ async function handleApi(request, response, url) {
   }
 
   if (pathname.startsWith('/api/')) {
-    if (!user && !(method === 'POST' && pathname === '/api/bookings')) {
+    const publicTicketVerification = method === 'GET' && /^\/api\/tickets\/[0-9a-f-]+\/verify$/i.test(pathname);
+    if (!user && !(method === 'POST' && pathname === '/api/bookings') && !publicTicketVerification) {
       sendJson(response, 401, { error: 'Sign in to continue.' });
+      return;
+    }
+
+    const ticketVerificationMatch = pathname.match(/^\/api\/tickets\/([0-9a-f-]+)\/verify$/i);
+    if (ticketVerificationMatch && method === 'GET') {
+      const token = url.searchParams.get('token') || '';
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      let verified = await db.prepare(`
+        SELECT d.id, d.document_reference AS documentReference, d.document_version AS version,
+               d.document_type AS documentType, d.status, d.issued_at AS issuedAt,
+               b.state AS bookingState, b.reference AS bookingReference,
+               b.travel_date AS travelDate, a.name AS issuingAgency,
+               c.route_badge AS routeBadge
+        FROM booking_documents d JOIN bookings b ON b.id = d.booking_id JOIN agencies a ON a.id = b.agency_id
+        LEFT JOIN catalog_products c ON c.id = b.offer_id
+        WHERE d.id = ? AND d.status = 'READY' AND d.verification_token_hash = ?
+      `).get(ticketVerificationMatch[1], tokenHash);
+      const superseded = !verified && await db.prepare(`
+        SELECT d.id, v.document_reference AS documentReference, v.document_version AS version,
+               d.document_type AS documentType, v.status, v.issued_at AS issuedAt,
+               b.state AS bookingState, b.reference AS bookingReference,
+               b.travel_date AS travelDate, a.name AS issuingAgency,
+               c.route_badge AS routeBadge
+        FROM booking_document_versions v
+        JOIN booking_documents d ON d.id = v.document_id
+        JOIN bookings b ON b.id = v.booking_id
+        JOIN agencies a ON a.id = b.agency_id
+        LEFT JOIN catalog_products c ON c.id = b.offer_id
+        WHERE v.document_id = ? AND v.verification_token_hash = ?
+      `).get(ticketVerificationMatch[1], tokenHash);
+      if (superseded) verified = superseded;
+      const valid = Boolean(verified);
+      const status = !verified ? 'Not verified'
+        : verified.bookingState === 'CANCELLED' ? 'Cancelled'
+          : verified.status === 'SUPERSEDED' ? 'Superseded'
+          : verified.bookingState === 'ACCEPTED' ? 'Valid SAFAR KAABE document' : 'No longer current';
+      const detail = valid
+        ? `<dl><dt>Document reference</dt><dd>${escapeXml(verified.documentReference || verified.bookingReference)}</dd><dt>Booking reference</dt><dd>${escapeXml(verified.bookingReference)}</dd><dt>Issuing agency</dt><dd>${escapeXml(verified.issuingAgency)}</dd><dt>Route</dt><dd>${escapeXml(verified.routeBadge || 'Not specified')}</dd><dt>Travel date</dt><dd>${escapeXml(verified.travelDate || 'Not specified')}</dd><dt>Issued</dt><dd>${escapeXml(verified.issuedAt || 'Not available')}</dd></dl>`
+        : '<p>The document reference or verification token is invalid.</p>';
+      response.writeHead(valid ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+      response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SAFAR KAABE document verification</title><style>body{font:16px system-ui;background:#101b32;color:#fff;margin:0;padding:2rem}.card{max-width:42rem;margin:8vh auto;background:#f7f9fc;color:#101b32;border-radius:1rem;padding:2rem}h1{color:#185bd5}dt{font-size:.75rem;color:#596579;text-transform:uppercase;margin-top:1rem}dd{margin:.25rem 0;font-weight:700}.notice{padding:.8rem;border-radius:.5rem;background:${valid && verified.bookingState === 'ACCEPTED' && verified.status !== 'SUPERSEDED' ? '#dcfce7' : '#fee2e2'}}.foot{margin-top:1.5rem;font-size:.8rem;color:#596579}</style><main class="card"><h1>SAFAR KAABE</h1><h2>Document verification</h2><p class="notice">${escapeXml(status)}</p>${detail}<p class="foot">This verifies a SAFAR KAABE booking document only. It is not an airline-issued ticket or boarding pass.</p></main></html>`);
+      return;
+    }
+
+    const ticketBookingMatch = pathname.match(/^\/api\/bookings\/([0-9a-f-]+)\/ticket(?:\.pdf|\.jpg|\/generate|\/email)?$/i);
+    if (ticketBookingMatch && ['GET', 'POST'].includes(method)) {
+      const bookingId = ticketBookingMatch[1];
+      const ticketRecord = await db.prepare(`SELECT d.*, b.customer_id AS customerId, b.agency_id AS agencyId,
+        (SELECT status FROM booking_document_deliveries WHERE document_id = d.id ORDER BY updated_at DESC LIMIT 1) AS emailDeliveryStatus,
+        (SELECT sent_at FROM booking_document_deliveries WHERE document_id = d.id AND status = 'SENT' ORDER BY sent_at DESC LIMIT 1) AS emailSentAt
+        FROM booking_documents d JOIN bookings b ON b.id = d.booking_id
+        WHERE d.booking_id = ? AND d.document_type = 'BOOKING_CONFIRMATION'`).get(bookingId);
+      const bookingOwner = ticketRecord || await db.prepare('SELECT customer_id AS customerId, agency_id AS agencyId FROM bookings WHERE id = ?').get(bookingId);
+      const canAccess = bookingOwner && (user.role === 'SUPER_ADMIN' || (user.role === 'AGENCY' && bookingOwner.agencyId === user.agency_id) || (user.role === 'CLIENT' && bookingOwner.customerId === user.id));
+      if (method === 'GET' && pathname.endsWith('/ticket')) {
+        if (!canAccess) { sendJson(response, 404, { error: 'Booking confirmation not found.' }); return; }
+        sendJson(response, 200, {
+          ticket: ticketRecord?.status === 'READY' ? ticketDocumentPublic(ticketRecord, requestOrigin(request)) : null,
+          status: ticketRecord?.status || 'NOT_GENERATED',
+          error: user.role === 'CLIENT' ? null : ticketRecord?.error_message || null,
+          retryAvailable: Boolean(ticketRecord?.error_message) ||
+            (ticketRecord?.status === 'READY' && Number(ticketRecord.layout_version || 1) < ticketLayoutVersion),
+          email: ticketRecord ? { status: ticketRecord.emailDeliveryStatus || ticketRecord.email_delivery_status || null, sentAt: ticketRecord.emailSentAt || ticketRecord.email_sent_at || null } : null
+        });
+        return;
+      }
+      if (method === 'POST' && pathname.endsWith('/ticket/generate')) {
+        const bookingOwner = ticketRecord || await db.prepare('SELECT customer_id AS customerId, agency_id AS agencyId FROM bookings WHERE id = ?').get(bookingId);
+        const assignedAgency = user?.role === 'AGENCY' && bookingOwner?.agencyId === user.agency_id;
+        const travelerRetry = user?.role === 'CLIENT' && bookingOwner?.customerId === user.id &&
+          (['FAILED', 'NOT_GENERATED'].includes(ticketRecord?.status || 'NOT_GENERATED') ||
+            (ticketRecord?.status === 'READY' &&
+              (Boolean(ticketRecord.error_message) || Number(ticketRecord.layout_version || 1) < ticketLayoutVersion)));
+        if (!user || !(user.role === 'SUPER_ADMIN' || assignedAgency || travelerRetry)) {
+          sendJson(response, 403, { error: 'Only the assigned agency, Super Admin, or booking traveler retrying their own failed document can generate this confirmation.' }); return;
+        }
+        if (!authorizeMutation(request, response, session)) return;
+        const result = await ensureBookingTicketDocument(bookingId, requestOrigin(request));
+        sendJson(response, 200, { ticket: result.document, email: result.email });
+        return;
+      }
+      if (method === 'POST' && pathname.endsWith('/ticket/email')) {
+        if (!canAccess) { sendJson(response, 404, { error: 'Booking confirmation not found.' }); return; }
+        if (!authorizeMutation(request, response, session)) return;
+        if (!ticketRecord || ticketRecord.status !== 'READY' || !ticketRecord.pdf_data || !ticketRecord.jpg_data) {
+          sendJson(response, 409, { error: 'Generate and store the booking document before retrying email delivery.' });
+          return;
+        }
+        const emailBooking = await db.prepare(`
+          SELECT b.id, b.reference, b.traveler_name AS travelerName, b.traveler_email AS travelerEmail,
+                 b.travel_date AS travelDate, b.offer_title AS offerTitle, c.route_badge AS routeBadge,
+                 c.destination, a.id AS agencyId, a.name AS agencyName, a.logo_mime AS agencyLogoMime,
+                 a.logo_data AS agencyLogoData,
+                 (SELECT email FROM users WHERE agency_id = a.id AND role = 'AGENCY' ORDER BY created_at LIMIT 1) AS agencyEmail,
+                 (SELECT phone FROM users WHERE agency_id = a.id AND role = 'AGENCY' ORDER BY created_at LIMIT 1) AS agencyPhone
+          FROM bookings b JOIN agencies a ON a.id = b.agency_id
+          LEFT JOIN catalog_products c ON c.id = b.offer_id WHERE b.id = ?
+        `).get(bookingId);
+        const email = await deliverTicketReadyEmail(emailBooking, ticketRecord, requestOrigin(request));
+        sendJson(response, 200, { ticket: ticketDocumentPublic(ticketRecord, requestOrigin(request)), email });
+        return;
+      }
+      if (method === 'GET' && pathname.endsWith('/ticket.pdf')) {
+        if (!canAccess || !ticketRecord || ticketRecord.status !== 'READY' || !ticketRecord.pdf_data) { sendJson(response, 404, { error: 'Booking confirmation PDF is not available.' }); return; }
+        sendPdf(response, ticketRecord.pdf_data, ticketRecord.file_name, url.searchParams.get('download') === '1');
+        return;
+      }
+      if (method === 'GET' && pathname.endsWith('/ticket.jpg')) {
+        if (!canAccess || !ticketRecord || ticketRecord.status !== 'READY' || !ticketRecord.jpg_data) { sendJson(response, 404, { error: 'Booking confirmation JPG is not available.' }); return; }
+        sendJpg(response, ticketRecord.jpg_data, ticketRecord.jpg_file_name || `${bookingId}.jpg`, url.searchParams.get('download') === '1');
+        return;
+      }
+    }
+
+    if (method === 'GET' && pathname === '/api/notifications') {
+      if (!user) { sendJson(response, 401, { error: 'Sign in to continue.' }); return; }
+      const notifications = await db.prepare(`
+        SELECT id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at
+        FROM notifications WHERE recipient_user_id = ? ORDER BY created_at DESC LIMIT 100
+      `).all(user.id);
+      const unread = notifications.filter(item => !item.read_at).length;
+      sendJson(response, 200, { notifications: notifications.map(notificationPublic), unreadCount: unread });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/notifications/stream') {
+      if (!user) { sendJson(response, 401, { error: 'Sign in to continue.' }); return; }
+      if (!catalogRealtimeSupported) {
+        sendJson(response, 404, { error: 'Live notifications are not available on this server.' });
+        return;
+      }
+      response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      response.write('event: ready\ndata: {}\n\n');
+      if (!notificationEventSubscribers.has(user.id)) notificationEventSubscribers.set(user.id, new Set());
+      notificationEventSubscribers.get(user.id).add(response);
+      const heartbeat = setInterval(() => { try { response.write(': heartbeat\n\n'); } catch {} }, 25000);
+      request.on('close', () => {
+        clearInterval(heartbeat);
+        const subscribers = notificationEventSubscribers.get(user.id);
+        subscribers?.delete(response);
+        if (subscribers?.size === 0) notificationEventSubscribers.delete(user.id);
+      });
+      return;
+    }
+
+    if (method === 'PATCH' && /^\/api\/notifications\/[^/]+$/.test(pathname)) {
+      if (!authorizeMutation(request, response, session)) return;
+      const notificationId = decodeURIComponent(pathname.split('/').pop());
+      const body = await readJson(request);
+      const action = String(body.action || '').toUpperCase();
+      if (!['READ', 'UNREAD'].includes(action)) { sendJson(response, 400, { error: 'Choose READ or UNREAD.' }); return; }
+      const notification = await db.prepare('SELECT id FROM notifications WHERE id = ? AND recipient_user_id = ?').get(notificationId, user.id);
+      if (!notification) { sendJson(response, 404, { error: 'Notification not found.' }); return; }
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?').run(action === 'READ' ? nowIso() : null, notificationId);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/notifications/read-all') {
+      if (!authorizeMutation(request, response, session)) return;
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE recipient_user_id = ? AND read_at IS NULL').run(nowIso(), user.id);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/push/public-key') {
+      sendJson(response, 200, { configured: webPushConfigured, publicKey: webPushConfigured ? process.env.VAPID_PUBLIC_KEY : null });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/push/subscriptions') {
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      const subscription = body.subscription && typeof body.subscription === 'object' ? body.subscription : body;
+      if (typeof subscription.endpoint !== 'string' || !/^https:\/\//i.test(subscription.endpoint) || !subscription.keys || typeof subscription.keys.p256dh !== 'string' || typeof subscription.keys.auth !== 'string') {
+        sendJson(response, 400, { error: 'A valid browser push subscription is required.' }); return;
+      }
+      const timestamp = nowIso();
+      await db.prepare(`
+        INSERT INTO push_subscriptions (id, user_id, endpoint, subscription_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (endpoint) DO UPDATE SET user_id = excluded.user_id, subscription_json = excluded.subscription_json, updated_at = excluded.updated_at
+      `).run(crypto.randomUUID(), user.id, subscription.endpoint, JSON.stringify(subscription), timestamp, timestamp);
+      sendJson(response, 201, { ok: true });
+      return;
+    }
+
+    if (method === 'DELETE' && pathname === '/api/push/subscriptions') {
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      if (typeof body.endpoint !== 'string') { sendJson(response, 400, { error: 'Endpoint is required.' }); return; }
+      await db.prepare('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?').run(user.id, body.endpoint);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/notification-preferences') {
+      const timestamp = nowIso();
+      await db.prepare(`INSERT INTO notification_preferences (user_id, updated_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING`).run(user.id, timestamp);
+      const preferences = await db.prepare('SELECT sound_enabled AS soundEnabled, desktop_push_enabled AS desktopPushEnabled FROM notification_preferences WHERE user_id = ?').get(user.id);
+      sendJson(response, 200, { soundEnabled: Boolean(preferences.soundEnabled), desktopPushEnabled: Boolean(preferences.desktopPushEnabled) });
+      return;
+    }
+
+    if (method === 'PATCH' && pathname === '/api/notification-preferences') {
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      if (typeof body.soundEnabled !== 'boolean' || typeof body.desktopPushEnabled !== 'boolean') { sendJson(response, 400, { error: 'Notification preferences are invalid.' }); return; }
+      await db.prepare(`
+        INSERT INTO notification_preferences (user_id, sound_enabled, desktop_push_enabled, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT (user_id) DO UPDATE SET sound_enabled = excluded.sound_enabled, desktop_push_enabled = excluded.desktop_push_enabled, updated_at = excluded.updated_at
+      `).run(user.id, body.soundEnabled ? 1 : 0, body.desktopPushEnabled ? 1 : 0, nowIso());
+      sendJson(response, 200, { ok: true });
       return;
     }
 
@@ -1711,8 +2711,16 @@ async function handleApi(request, response, url) {
           sendJson(response, 403, { error: 'Your agency cannot open a support conversation while inactive.' });
           return;
         }
+        if (body.recipientId) {
+          customerId = requireString(body.recipientId, 'Traveler', 80);
+          if (!await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'CLIENT'").get(customerId)) {
+            sendJson(response, 404, { error: 'The selected traveler is not available.' });
+            return;
+          }
+        }
       }
       const conversationId = crypto.randomUUID();
+      const firstMessageId = crypto.randomUUID();
       const createdAt = nowIso();
       await runInTransaction(async () => {
         await db.prepare(`
@@ -1722,8 +2730,13 @@ async function handleApi(request, response, url) {
         await db.prepare(`
           INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
           VALUES (?, ?, ?, ?, ?)
-        `).run(crypto.randomUUID(), conversationId, user.id, message, createdAt);
+        `).run(firstMessageId, conversationId, user.id, message, createdAt);
       });
+      await createConversationMessageNotifications(
+        { id: conversationId, agency_id: agencyId, customer_id: customerId },
+        user,
+        { id: firstMessageId, body: message, createdAt }
+      );
       await audit(user.id, 'CONVERSATION_CREATED', `${subject} (${conversationId})`);
       sendJson(response, 201, {
         conversation: {
@@ -2042,6 +3055,11 @@ async function handleApi(request, response, url) {
         await db.prepare('UPDATE users SET typing_conversation_id = NULL, typing_until = NULL WHERE id = ?').run(user.id);
         await db.prepare('DELETE FROM conversation_hidden WHERE conversation_id = ?').run(conversation.id);
       });
+      await createConversationMessageNotifications(conversation, user, {
+        id: messageId,
+        body: displayBody,
+        createdAt
+      });
       await audit(user.id, messageType === 'TEXT' ? 'CONVERSATION_MESSAGE_SENT' : `CONVERSATION_${messageType}_SENT`, `${conversation.subject} (${conversation.id})`);
       sendJson(response, 201, {
         message: {
@@ -2222,7 +3240,7 @@ async function handleApi(request, response, url) {
       const selectBooking = `SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId,
         cancellation_reason AS cancellationReason, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone,
         offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json,
-        seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc,
+        seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, updated_at AS updatedAtUtc,
         (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus,
         (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId,
         (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference
@@ -2235,27 +3253,36 @@ async function handleApi(request, response, url) {
 
       if (method === 'PATCH') {
         const body = await readJson(request);
+        let generatedTicket = null;
+        let ticketError = null;
         if (body.action === 'ACCEPT') {
           if (!['REQUESTED', 'PAYMENT_RECEIVED'].includes(existing.state)) {
             sendJson(response, 409, { error: 'Only a new request or a paid request can be accepted.' });
             return;
           }
-          const accepted = await db.prepare('UPDATE bookings SET state = ? WHERE id = ? AND agency_id = ? AND state = ?')
-            .run('ACCEPTED', bookingId, existing.agencyId, existing.state);
+          const accepted = await db.prepare('UPDATE bookings SET state = ?, updated_at = ? WHERE id = ? AND agency_id = ? AND state = ?')
+            .run('ACCEPTED', nowIso(), bookingId, existing.agencyId, existing.state);
           if (accepted.changes !== 1) {
             sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
             return;
           }
           await audit(user.id, 'BOOKING_REQUEST_ACCEPTED', `${existing.ref} (${existing.agencyId})`);
+          try {
+            const ticketResult = await ensureBookingTicketDocument(bookingId, `https://${request.headers.host}`);
+            generatedTicket = ticketResult.document;
+          } catch (error) {
+            ticketError = error.message;
+            console.error('Booking confirmation generation failed after approval:', error);
+          }
         } else if (body.action === 'UNDO_ACCEPTANCE') {
           if (existing.state !== 'ACCEPTED' || existing.paymentProvider !== 'REQUEST_ONLY' || existing.paymentStatus === 'APPROVED') {
             sendJson(response, 409, { error: 'Only an unpaid accepted request can be returned to the pending list. Use booking cancellation for paid bookings.' });
             return;
           }
-          const reopened = await db.prepare(`UPDATE bookings SET state = 'REQUESTED'
+          const reopened = await db.prepare(`UPDATE bookings SET state = 'REQUESTED', updated_at = ?
             WHERE id = ? AND agency_id = ? AND state = 'ACCEPTED' AND payment_provider = 'REQUEST_ONLY'
               AND NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED')`)
-            .run(bookingId, existing.agencyId);
+            .run(nowIso(), bookingId, existing.agencyId);
           if (reopened.changes !== 1) {
             sendJson(response, 409, { error: 'This booking can no longer be reopened. Refresh the bookings list and try again.' });
             return;
@@ -2274,22 +3301,63 @@ async function handleApi(request, response, url) {
           const travelerEmailText = typeof body.travelerEmail === 'string' ? body.travelerEmail.trim() : '';
           const travelerEmail = travelerEmailText ? normalizeEmail(travelerEmailText) : null;
           const phone = requireString(body.phone, 'Phone', 40);
-          const updated = await db.prepare(`UPDATE bookings SET traveler_name = ?, traveler_email = ?, phone = ?
+          const updated = await db.prepare(`UPDATE bookings SET traveler_name = ?, traveler_email = ?, phone = ?, updated_at = ?
             WHERE id = ? AND agency_id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'`)
-            .run(travelerName, travelerEmail, phone, bookingId, existing.agencyId);
+            .run(travelerName, travelerEmail, phone, nowIso(), bookingId, existing.agencyId);
           if (updated.changes !== 1) {
             sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
             return;
           }
           await audit(user.id, 'BOOKING_TRAVELER_DETAILS_UPDATED', `${existing.ref} (${existing.agencyId})`);
+        } else if (body.action === 'REJECT') {
+          if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
+            sendJson(response, 409, { error: 'Only an unpaid requested booking can be rejected.' });
+            return;
+          }
+          const reason = typeof body.reason === 'string' ? body.reason.trim().replace(/\s+/g, ' ').slice(0, 500) : '';
+          const rejected = await runInTransaction(async () => {
+            const changed = await db.prepare(`UPDATE bookings SET state = 'REJECTED', cancellation_reason = ?, updated_at = ?
+              WHERE id = ? AND agency_id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'
+              RETURNING seat_count AS seatCount, offer_id AS offerId`).get(reason || 'Rejected by agency', nowIso(), bookingId, existing.agencyId);
+            if (!changed) return null;
+            if (changed.offerId) await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ? AND agency_id = ?')
+              .run(changed.seatCount, changed.offerId, existing.agencyId);
+            return changed;
+          });
+          if (!rejected) {
+            sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_REQUEST_REJECTED', `${existing.ref} (${existing.agencyId})`);
+          if (rejected.offerId) publishCatalogChange('availability');
+        } else if (body.action === 'RESTORE_REQUESTED') {
+          if (existing.state !== 'REJECTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
+            sendJson(response, 409, { error: 'Only a rejected unpaid request can be restored.' });
+            return;
+          }
+          const restored = await runInTransaction(async () => {
+            if (existing.offerId) {
+              const inventory = await db.prepare('UPDATE catalog_products SET available = available - ? WHERE id = ? AND agency_id = ? AND available >= ?')
+                .run(existing.seatCount, existing.offerId, existing.agencyId, existing.seatCount);
+              if (inventory.changes !== 1) return null;
+            }
+            return db.prepare(`UPDATE bookings SET state = 'REQUESTED', cancellation_reason = NULL, updated_at = ?
+              WHERE id = ? AND agency_id = ? AND state = 'REJECTED'`).run(nowIso(), bookingId, existing.agencyId);
+          });
+          if (!restored || restored.changes !== 1) {
+            sendJson(response, 409, { error: 'The request could not be restored because inventory changed. Refresh and try again.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_REQUEST_RESTORED', `${existing.ref} (${existing.agencyId})`);
+          if (existing.offerId) publishCatalogChange('availability');
         } else {
-          sendJson(response, 400, { error: 'Choose accept, undo acceptance, or edit traveler details.' });
+          sendJson(response, 400, { error: 'Choose accept, undo acceptance, edit, reject, or restore this booking request.' });
           return;
         }
 
         const updatedBooking = await db.prepare(selectBooking).get(bookingId);
         const { financials_json, ...booking } = updatedBooking;
-        sendJson(response, 200, { booking: { ...booking, financials: JSON.parse(financials_json) } });
+        sendJson(response, 200, { booking: { ...booking, financials: JSON.parse(financials_json) }, ticket: generatedTicket, ticketError });
         return;
       }
 
@@ -2320,10 +3388,10 @@ async function handleApi(request, response, url) {
         return;
       }
       const canceled = await runInTransaction(async () => {
-        const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?
+        const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?
           WHERE id = ? AND agency_id = ? AND state = ? AND payment_provider = ?
           RETURNING seat_count AS seatCount`)
-          .get(reason, bookingId, existing.agencyId, existing.state, existing.paymentProvider);
+          .get(reason, nowIso(), bookingId, existing.agencyId, existing.state, existing.paymentProvider);
         if (!canceledBooking) return null;
         let available = null;
         if (returnSeats) {
@@ -2352,12 +3420,36 @@ async function handleApi(request, response, url) {
     }
 
     if (pathname === '/api/bookings' && method === 'GET') {
-      const query = user.role === 'SUPER_ADMIN'
-        ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, cancellation_reason AS cancellationReason, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings ORDER BY created_at DESC`)
-        : user.role === 'AGENCY'
-          ? await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, cancellation_reason AS cancellationReason, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE agency_id = ? ORDER BY created_at DESC`)
-          : await db.prepare(`SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId, cancellation_reason AS cancellationReason, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone, offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json, seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus, (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId, (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference FROM bookings WHERE customer_id = ? ORDER BY created_at DESC`);
-      const records = user.role === 'SUPER_ADMIN' ? await query.all() : await query.all(user.role === 'AGENCY' ? user.agency_id : user.id);
+      const bookingScope = user.role === 'SUPER_ADMIN' ? '' : user.role === 'AGENCY' ? 'WHERE b.agency_id = ?' : 'WHERE b.customer_id = ?';
+      const bookingScopeValue = user.role === 'SUPER_ADMIN' ? [] : [user.role === 'AGENCY' ? user.agency_id : user.id];
+      const records = await db.prepare(`
+        SELECT b.id, b.reference AS ref, b.pnr, b.agency_id AS agencyId, b.offer_id AS offerId,
+          b.cancellation_reason AS cancellationReason, b.customer_id AS customerId,
+          b.traveler_name AS travelerName, b.traveler_email AS travelerEmail, b.phone,
+          b.offer_title AS offerTitle, b.category, b.payment_provider AS paymentProvider, b.state,
+          b.financials_json, b.seat_count AS seatCount, b.travel_date AS travelDate,
+          b.created_at AS createdAtUtc, b.updated_at AS updatedAtUtc,
+          (SELECT status FROM waafi_payments WHERE booking_id = b.id) AS paymentStatus,
+          (SELECT transaction_id FROM waafi_payments WHERE booking_id = b.id) AS paymentTransactionId,
+          (SELECT reference_id FROM waafi_payments WHERE booking_id = b.id) AS paymentReference,
+          a.name AS agencyName, a.logo_mime AS agencyLogoMime, a.logo_data AS agencyLogoData,
+          (SELECT email FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyEmail,
+          (SELECT phone FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyPhone,
+          c.route_badge AS routeBadge, c.destination, c.supplier_name AS supplierName,
+          c.supplier_ref AS supplierRef, c.baggage, c.specs,
+          d.id AS ticketDocumentId, d.document_reference AS ticketDocumentReference,
+          d.document_version AS ticketDocumentVersion, d.document_type AS ticketDocumentType,
+          d.status AS ticketStatus, d.file_name AS ticketFileName, d.jpg_file_name AS ticketJpgFileName,
+          d.issued_at AS ticketIssuedAt,
+          CASE WHEN d.error_message IS NOT NULL OR COALESCE(d.layout_version, 1) < ${ticketLayoutVersion} THEN 1 ELSE 0 END AS ticketRetryAvailable,
+          d.email_delivery_status AS ticketEmailStatus, d.email_sent_at AS ticketEmailSentAt
+        FROM bookings b
+        JOIN agencies a ON a.id = b.agency_id
+        LEFT JOIN catalog_products c ON c.id = b.offer_id
+        LEFT JOIN booking_documents d ON d.booking_id = b.id AND d.document_type = 'BOOKING_CONFIRMATION'
+        ${bookingScope}
+        ORDER BY b.created_at DESC
+      `).all(...bookingScopeValue);
       sendJson(response, 200, { bookings: records.map(({ financials_json, ...booking }) => ({ ...booking, financials: JSON.parse(financials_json) })) });
       return;
     }
@@ -2504,32 +3596,93 @@ async function handleApi(request, response, url) {
           }
           paymentStart = { referenceId, hppUrl, orderId: params.orderId ? String(params.orderId) : null };
         } catch (error) {
-          await db.prepare('UPDATE catalog_products SET available = available + 1 WHERE id = ?').run(offer.id);
+          await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ?').run(seatCount, offer.id);
           throw error;
         }
       }
       const createdAtUtc = nowIso();
+      let bookingConversationId = null;
+      const bookingNotifications = [];
       try {
         await runInTransaction(async () => {
         await db.prepare(`
-          INSERT INTO bookings (id, reference, pnr, agency_id, offer_id, customer_id, traveler_name, traveler_email, phone, offer_title, category, payment_provider, state, financials_json, seat_count, travel_date, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(booking.id, booking.reference, booking.pnr, booking.agencyId, booking.offerId, booking.customerId, booking.travelerName, booking.travelerEmail, booking.phone, booking.offerTitle, booking.category, booking.paymentProvider, booking.state, JSON.stringify(booking.financials), booking.seatCount, booking.travelDate, createdAtUtc);
+          INSERT INTO bookings (id, reference, pnr, agency_id, offer_id, customer_id, traveler_name, traveler_email, phone, offer_title, category, payment_provider, state, financials_json, seat_count, travel_date, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(booking.id, booking.reference, booking.pnr, booking.agencyId, booking.offerId, booking.customerId, booking.travelerName, booking.travelerEmail, booking.phone, booking.offerTitle, booking.category, booking.paymentProvider, booking.state, JSON.stringify(booking.financials), booking.seatCount, booking.travelDate, createdAtUtc, createdAtUtc);
+        if (booking.customerId) {
+          const existingConversation = await db.prepare(`
+            SELECT id FROM conversations
+            WHERE agency_id = ? AND customer_id = ?
+            ORDER BY last_message_at DESC
+            LIMIT 1
+          `).get(booking.agencyId, booking.customerId);
+          bookingConversationId = existingConversation?.id || crypto.randomUUID();
+          if (!existingConversation) {
+            await db.prepare(`
+              INSERT INTO conversations (id, agency_id, customer_id, subject, created_by, created_at, last_message_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              bookingConversationId,
+              booking.agencyId,
+              booking.customerId,
+              `Booking ${booking.reference}`,
+              booking.customerId,
+              createdAtUtc,
+              createdAtUtc
+            );
+          }
+          await db.prepare(`
+            INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(
+            crypto.randomUUID(),
+            bookingConversationId,
+            booking.customerId,
+            `Booking request ${booking.reference} submitted for ${booking.offerTitle}. ${booking.seatCount} ${booking.seatCount === 1 ? 'seat' : 'seats'} requested${booking.travelDate ? ` for ${booking.travelDate}` : ''}.`,
+            createdAtUtc
+          );
+          await db.prepare('UPDATE conversations SET last_message_at = ? WHERE id = ?')
+            .run(createdAtUtc, bookingConversationId);
+        }
         if (paymentStart) {
           await db.prepare(`INSERT INTO waafi_payments (id, booking_id, reference_id, amount_cents, currency, status, hpp_url, order_id, updated_at, created_at)
             VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?, ?)`)
             .run(crypto.randomUUID(), booking.id, paymentStart.referenceId, booking.financials.customerGrandTotalCents,
               paymentStart.hppUrl, paymentStart.orderId, createdAtUtc, createdAtUtc);
         }
+        const agencyRecipients = await db.prepare("SELECT id FROM users WHERE agency_id = ? AND role = 'AGENCY'").all(booking.agencyId);
+        for (const recipient of agencyRecipients) {
+          const notification = {
+            id: crypto.randomUUID(), recipientUserId: recipient.id, agencyId: booking.agencyId,
+            bookingId: booking.id, conversationId: bookingConversationId, type: 'BOOKING_REQUEST',
+            title: 'New Booking Request',
+            body: `${booking.travelerName} requested ${booking.offerTitle}${booking.travelDate ? ` on ${booking.travelDate}` : ''}. Booking ID: ${booking.reference}.`,
+            href: `/?booking=${encodeURIComponent(booking.id)}`, createdAt: createdAtUtc, readAt: null,
+            dedupeKey: `BOOKING_REQUEST:${booking.id}:${recipient.id}`
+          };
+          const inserted = await db.prepare(`
+            INSERT INTO notifications (id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (dedupe_key) DO NOTHING
+          `).run(notification.id, notification.recipientUserId, notification.agencyId, notification.bookingId, notification.conversationId,
+            notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
+          if (inserted.changes === 1) bookingNotifications.push(notification);
+        }
         });
       } catch (error) {
-        await db.prepare('UPDATE catalog_products SET available = available + 1 WHERE id = ?').run(offer.id);
+        await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ?').run(seatCount, offer.id);
         throw error;
+      }
+      for (const notification of bookingNotifications) {
+        publishNotification(notification.recipientUserId, notification);
+        deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push notification failed:', error.message));
       }
       await audit(user?.id || null, paymentStart ? 'WAAFI_CHECKOUT_STARTED' : 'BOOKING_REQUESTED', `${booking.reference} (${booking.agencyId})`);
       publishCatalogChange('availability');
       sendJson(response, 201, { booking: { ...booking, ref: booking.reference, createdAtUtc,
-        paymentStatus: paymentStart ? 'PENDING' : null, paymentReference: paymentStart?.referenceId || null },
+        paymentStatus: paymentStart ? 'PENDING' : null, paymentReference: paymentStart?.referenceId || null,
+        conversationId: bookingConversationId },
+        conversationId: bookingConversationId,
         paymentUrl: paymentStart?.hppUrl || null });
       return;
     }

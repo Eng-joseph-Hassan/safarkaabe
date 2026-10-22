@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { SMTPServer } = require('smtp-server');
 const { DatabaseSync } = require('node:sqlite');
+const sharp = require('sharp');
 
 async function availablePort() {
   const listener = net.createServer();
@@ -31,6 +32,7 @@ function csrfToken(cookie) {
 test('server authentication, role boundaries, agency CRM and booking ownership', async t => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'safar-kaabe-test-'));
   const deliveredEmails = [];
+  let failNextEmail = false;
   const waafiProviderRequests = [];
   const waafiPurchases = new Map();
   let waafiPaymentStatus = 'PENDING';
@@ -81,6 +83,11 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
       const chunks = [];
       stream.on('data', chunk => chunks.push(chunk));
       stream.on('end', () => {
+        if (failNextEmail) {
+          failNextEmail = false;
+          callback(new Error('Simulated SMTP delivery failure'));
+          return;
+        }
         deliveredEmails.push({ envelope: session.envelope, body: Buffer.concat(chunks).toString('utf8') });
         callback();
       });
@@ -141,6 +148,34 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
       financials_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE booking_documents (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      document_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+      pdf_data TEXT,
+      document_hash TEXT,
+      verification_token_hash TEXT NOT NULL,
+      error_message TEXT,
+      issued_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (booking_id, document_type)
+    );
+    CREATE TABLE booking_document_deliveries (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      recipient_email TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      sent_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (document_id, recipient_email)
+    );
   `);
   legacyDb.close();
   const port = await availablePort();
@@ -151,6 +186,8 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     env: {
       ...process.env,
       NODE_ENV: 'test',
+      VERCEL_ENV: 'production',
+      VERCEL_DEPLOYMENT_ID: 'test-deployment',
       HOST: '127.0.0.1',
       PORT: String(port),
       SAFAR_KAABE_DATA_DIR: dataDir,
@@ -181,15 +218,19 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     if (cookie) headers.Cookie = cookie;
     if (csrf) headers['X-CSRF-Token'] = csrf;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    return fetch(`${baseUrl}${route}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    try {
+      return await fetch(`${baseUrl}${route}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+    } catch (error) {
+      throw new Error(`Request ${method} ${route} failed: ${error.message}\n${serverErrors}`, { cause: error });
+    }
   }
 
   let ready = false;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     if (child.exitCode !== null) assert.fail(`server exited with ${child.exitCode}`);
     try {
       const response = await request('/api/setup/status');
@@ -200,7 +241,11 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  assert.equal(ready, true, 'server should start and expose setup status');
+  assert.equal(ready, true, `server should start and expose setup status: ${serverErrors}`);
+  const appVersionResponse = await request('/api/app-version');
+  assert.equal(appVersionResponse.status, 200);
+  assert.equal(appVersionResponse.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await appVersionResponse.json(), { releaseId: 'test-deployment' });
 
   const guestCatalogResponse = await request('/api/catalog');
   assert.equal(guestCatalogResponse.status, 200, 'travelers can browse without an account');
@@ -370,6 +415,11 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.equal(customerRegistration.status, 201);
   const customerCookie = cookieJar(customerRegistration);
   const customerCsrf = csrfToken(customerCookie);
+  const realtimeStatusResponse = await request('/api/catalog/realtime');
+  assert.deepEqual(await realtimeStatusResponse.json(), { supported: false }, 'serverless deployments use the periodic refresh fallback');
+  const notificationStreamResponse = await request('/api/notifications/stream', { cookie: customerCookie });
+  assert.equal(notificationStreamResponse.status, 404, 'serverless deployments never hold a function open for notification events');
+  assert.match((await notificationStreamResponse.json()).error, /not available/);
   const iceConfigResponse = await request('/api/calls/ice-config', { cookie: customerCookie });
   assert.equal(iceConfigResponse.status, 200);
   assert.equal(iceConfigResponse.headers.get('cache-control'), 'no-store');
@@ -1236,6 +1286,258 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   });
   assert.equal(resetAdminLogin.status, 200);
 
+  const ticketAgencyLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'owner@example.com', password: 'long-enough-owner-password' }
+  });
+  assert.equal(ticketAgencyLogin.status, 200);
+  const ticketAgencyCookie = cookieJar(ticketAgencyLogin);
+  const ticketAgencyCsrf = csrfToken(ticketAgencyCookie);
+  const ticketOfferResponse = await request('/api/catalog', {
+    method: 'POST',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: {
+      category: 'FLIGHT',
+      title: 'Ticket workflow test flight',
+      origin: 'BXX',
+      destination: 'NBO',
+      price: 300,
+      available: 1,
+      specs: 'Direct test listing',
+      published: true
+    }
+  });
+  assert.equal(ticketOfferResponse.status, 201);
+  const ticketOffer = (await ticketOfferResponse.json()).product;
+  const ticketBookingResponse = await request('/api/bookings', {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      offerId: ticketOffer.id,
+      travelerName: 'Traveler One',
+      phone: '+252611234567',
+      paymentMethod: 'REQUEST_ONLY'
+    }
+  });
+  assert.equal(ticketBookingResponse.status, 201);
+  const ticketBooking = (await ticketBookingResponse.json()).booking;
+  const ticketApprovalResponse = await request(`/api/bookings/${ticketBooking.id}`, {
+    method: 'PATCH',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: { action: 'ACCEPT' }
+  });
+  assert.equal(ticketApprovalResponse.status, 200);
+  const ticketApproval = await ticketApprovalResponse.json();
+  assert.equal(ticketApproval.booking.state, 'ACCEPTED', 'document errors never reject an approved booking');
+  assert.match(ticketApproval.ticketError, /confirmed travel date/, 'missing trip details identify the exact validation failure');
+  const ticketStatusBeforeRetry = await request(`/api/bookings/${ticketBooking.id}/ticket`, { cookie: customerCookie });
+  assert.equal((await ticketStatusBeforeRetry.json()).status, 'FAILED', 'validation failures have their own persistent document status');
+
+  const ticketDb = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  ticketDb.prepare('UPDATE bookings SET travel_date = ? WHERE id = ?').run('2099-03-20', ticketBooking.id);
+  ticketDb.close();
+  const emailsBeforeTicket = deliveredEmails.length;
+  failNextEmail = true;
+  const generatedTicketResponse = await request(`/api/bookings/${ticketBooking.id}/ticket/generate`, {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {}
+  });
+  const generatedTicketBody = await generatedTicketResponse.text();
+  assert.equal(generatedTicketResponse.status, 200, generatedTicketBody);
+  const generatedTicketResult = JSON.parse(generatedTicketBody);
+  const generatedTicket = generatedTicketResult.ticket;
+  assert.equal(generatedTicket.status, 'READY');
+  assert.equal(generatedTicketResult.email.status, 'FAILED', 'email failure is returned independently after files are saved');
+  assert.match(generatedTicket.fileName, /^SAFAR-KAABE-Booking-Voucher-.*\.pdf$/);
+  assert.match(generatedTicket.jpgFileName, /^SAFAR-KAABE-Booking-Voucher-.*\.jpg$/);
+  assert.ok(generatedTicket.documentReference);
+  const ownerBookings = await (await request('/api/bookings', { cookie: customerCookie })).json();
+  const travelerTicketBooking = ownerBookings.bookings.find(item => item.id === ticketBooking.id);
+  assert.equal(travelerTicketBooking.ticketStatus, 'READY', 'the ready ticket appears in My Trips data');
+  assert.equal(travelerTicketBooking.ticketEmailStatus, 'FAILED', 'email failure is tracked separately from ticket generation');
+  assert.equal(travelerTicketBooking.agencyLogoData, tinyPng, 'the ticket card receives the assigned agency logo');
+  assert.equal(deliveredEmails.length, emailsBeforeTicket, 'failed SMTP delivery does not count as a sent email');
+
+  const ticketPdfResponse = await request(`/api/bookings/${ticketBooking.id}/ticket.pdf`, { cookie: customerCookie });
+  assert.equal(ticketPdfResponse.status, 200);
+  assert.equal(ticketPdfResponse.headers.get('content-type'), 'application/pdf');
+  assert.match(ticketPdfResponse.headers.get('content-disposition'), /^inline;/);
+  const ticketPdf = Buffer.from(await ticketPdfResponse.arrayBuffer());
+  assert.equal(ticketPdf.subarray(0, 5).toString('ascii'), '%PDF-');
+  assert.ok(ticketPdf.toString('latin1').includes('%%EOF'));
+  assert.match(ticketPdf.toString('latin1'), /\/MediaBox\s+\[0\s+0\s+792\s+310\]/, 'the PDF uses the supplied landscape boarding-pass layout');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const standardFontDataUrl = `${path.resolve(path.dirname(require.resolve('pdfjs-dist/legacy/build/pdf.mjs')), '..', '..', 'standard_fonts').split(path.sep).join('/')}/`;
+  const parsedTicketLoadingTask = pdfjs.getDocument({ data: new Uint8Array(ticketPdf), standardFontDataUrl });
+  const parsedTicketPdf = await parsedTicketLoadingTask.promise;
+  assert.equal(parsedTicketPdf.numPages, 1);
+  const ticketPdfText = (await (await parsedTicketPdf.getPage(1)).getTextContent()).items.map(item => item.str).join(' ');
+  assert.match(ticketPdfText, /Traveler One/, 'ticket text is drawn in the PDF rather than flattened to an image');
+  assert.match(ticketPdfText, /SAFAR KAABE/);
+  assert.match(ticketPdfText, /BOOKING CONFIRMATION/);
+  assert.match(ticketPdfText, /BXX/);
+  assert.match(ticketPdfText, /NBO/);
+  assert.match(ticketPdfText, /not an airline(?:-issued)? boarding pass/i);
+  assert.match(ticketPdfText, /SCAN TO VERIFY/);
+  assert.doesNotMatch(ticketPdfText, /\b(?:GATE|SEAT|BOARDING TIME|FLIGHT NUMBER|TICKET NUMBER)\b/i,
+    'unverified airline details are not invented for the booking confirmation');
+  await parsedTicketLoadingTask.destroy();
+  const ticketPdfDownloadResponse = await request(`/api/bookings/${ticketBooking.id}/ticket.pdf?download=1`, { cookie: customerCookie });
+  assert.equal(ticketPdfDownloadResponse.status, 200);
+  assert.equal(ticketPdfDownloadResponse.headers.get('content-type'), 'application/pdf');
+  assert.match(ticketPdfDownloadResponse.headers.get('content-disposition'), /^attachment;/);
+  assert.equal(Buffer.from(await ticketPdfDownloadResponse.arrayBuffer()).subarray(0, 5).toString('ascii'), '%PDF-');
+  const ticketJpgResponse = await request(`/api/bookings/${ticketBooking.id}/ticket.jpg?download=1`, { cookie: customerCookie });
+  assert.equal(ticketJpgResponse.status, 200);
+  assert.equal(ticketJpgResponse.headers.get('content-type'), 'image/jpeg');
+  assert.match(ticketJpgResponse.headers.get('content-disposition'), /^attachment;/);
+  const ticketJpg = Buffer.from(await ticketJpgResponse.arrayBuffer());
+  const ticketJpgMetadata = await sharp(ticketJpg).metadata();
+  assert.equal(ticketJpgMetadata.format, 'jpeg');
+  assert.ok(ticketJpgMetadata.width >= 2800 && ticketJpgMetadata.height >= 1100, 'the ticket JPG is rendered at print-friendly resolution');
+  const ticketGeneratorSource = await fs.readFile(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.ok(ticketGeneratorSource.includes("booking.travelerName || 'Traveler'"), 'the voucher uses the booking passenger');
+  assert.ok(ticketGeneratorSource.includes('CONFIRMED TRAVEL DATE'), 'the voucher includes the confirmed travel date');
+  assert.ok(ticketGeneratorSource.includes('booking.specs') && ticketGeneratorSource.includes('booking.baggage'), 'the ticket includes available trip details');
+  assert.ok(ticketGeneratorSource.includes('const jpg = await createTicketJpgBuffer(pdf);'), 'the JPG is rasterized from the generated PDF');
+  const invalidVerification = await request(`/api/tickets/${generatedTicket.id}/verify?token=invalid`);
+  assert.equal(invalidVerification.status, 404);
+  assert.doesNotMatch(await invalidVerification.text(), /Traveler One/, 'invalid verification never exposes passenger details');
+
+  const unauthorizedTicketRead = await request(`/api/bookings/${ticketBooking.id}/ticket.pdf`, { cookie: secondCustomerCookie });
+  assert.equal(unauthorizedTicketRead.status, 404, 'another traveler cannot download this ticket');
+  const unauthenticatedTicketRead = await request(`/api/bookings/${ticketBooking.id}/ticket.pdf`);
+  assert.equal(unauthenticatedTicketRead.status, 401, 'ticket downloads require authentication');
+
+  const emailRetryResponse = await request(`/api/bookings/${ticketBooking.id}/ticket/email`, {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {}
+  });
+  assert.equal(emailRetryResponse.status, 200);
+  assert.equal((await emailRetryResponse.json()).email.status, 'SENT');
+  assert.equal(deliveredEmails.length, emailsBeforeTicket + 1);
+  assert.match(deliveredEmails.at(-1).body, /My Trips &amp; Vouchers|My Trips & Vouchers/);
+  assert.match(deliveredEmails.at(-1).body, /ticket\.pdf/);
+  assert.match(deliveredEmails.at(-1).body, /ticket\.jpg/);
+  assert.match(deliveredEmails.at(-1).body, /download=(?:3D)?1/);
+  assert.match(deliveredEmails.at(-1).body, /Traveler One/);
+  assert.match(deliveredEmails.at(-1).body, /Travel Partner/);
+  assert.match(deliveredEmails.at(-1).body, /Content-Type: application\/pdf/);
+  assert.match(deliveredEmails.at(-1).body, /Content-Type: image\/jpeg/);
+  const repeatTicketGeneration = await request(`/api/bookings/${ticketBooking.id}/ticket/generate`, {
+    method: 'POST',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: {}
+  });
+  assert.equal(repeatTicketGeneration.status, 200);
+  assert.equal(deliveredEmails.length, emailsBeforeTicket + 1, 'repeated ticket retries do not resend an already delivered email');
+  const ticketDbCheck = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  assert.equal(ticketDbCheck.prepare('SELECT COUNT(*) AS count FROM booking_documents WHERE booking_id = ?').get(ticketBooking.id).count, 1);
+  const storedTicket = ticketDbCheck.prepare('SELECT pdf_storage_path, jpg_storage_path, document_version, layout_version, status, email_delivery_status FROM booking_documents WHERE booking_id = ?').get(ticketBooking.id);
+  assert.equal(storedTicket.status, 'READY');
+  assert.equal(storedTicket.layout_version, 4);
+  assert.equal(storedTicket.email_delivery_status, 'SENT');
+  assert.ok(storedTicket.pdf_storage_path && storedTicket.jpg_storage_path);
+  assert.equal(ticketDbCheck.prepare('SELECT attempts FROM booking_document_deliveries WHERE document_id = (SELECT id FROM booking_documents WHERE booking_id = ?)').get(ticketBooking.id).attempts, 2);
+  ticketDbCheck.close();
+  const legacyLayoutDb = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  legacyLayoutDb.prepare("UPDATE booking_documents SET layout_version = 1, source_hash = 'previous-ticket-layout' WHERE booking_id = ?").run(ticketBooking.id);
+  legacyLayoutDb.close();
+  const travelerBookingsAfterLayoutUpdate = await (await request('/api/bookings', { cookie: customerCookie })).json();
+  assert.equal(travelerBookingsAfterLayoutUpdate.bookings.find(item => item.id === ticketBooking.id).ticketRetryAvailable, 1,
+    'existing tickets are offered a refresh after the ticket layout changes');
+  const refreshedLayoutResponse = await request(`/api/bookings/${ticketBooking.id}/ticket/generate`, {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {}
+  });
+  assert.equal(refreshedLayoutResponse.status, 200);
+  assert.equal((await refreshedLayoutResponse.json()).ticket.version, 2, 'layout refresh creates a new ticket version');
+  assert.equal(deliveredEmails.length, emailsBeforeTicket + 2, 'the refreshed ticket version is emailed once');
+  const versionChangeDb = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  versionChangeDb.prepare('UPDATE bookings SET travel_date = ?, phone = ? WHERE id = ?').run('2099-03-21', '+252612345678', ticketBooking.id);
+  versionChangeDb.close();
+  const versionedTicketResponse = await request(`/api/bookings/${ticketBooking.id}/ticket/generate`, {
+    method: 'POST',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: {}
+  });
+  assert.equal(versionedTicketResponse.status, 200);
+  const versionedTicket = (await versionedTicketResponse.json()).ticket;
+  assert.equal(versionedTicket.version, 3, 'changed confirmed itinerary creates a new document version');
+  assert.match(versionedTicket.documentReference, /-V3$/);
+  assert.equal(deliveredEmails.length, emailsBeforeTicket + 3, 'a new document version is emailed once');
+  const versionedJpgResponse = await request(`/api/bookings/${ticketBooking.id}/ticket.jpg`, { cookie: customerCookie });
+  assert.equal(versionedJpgResponse.status, 200);
+  const versionedJpg = Buffer.from(await versionedJpgResponse.arrayBuffer());
+  assert.notDeepEqual(versionedJpg, ticketJpg, 'a changed confirmed itinerary generates a newly populated voucher image');
+  const historyDb = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  assert.equal(historyDb.prepare('SELECT COUNT(*) AS count FROM booking_document_versions WHERE booking_id = ?').get(ticketBooking.id).count, 2);
+  assert.equal(historyDb.prepare('SELECT document_version FROM booking_document_deliveries WHERE document_id = (SELECT id FROM booking_documents WHERE booking_id = ?)').get(ticketBooking.id).document_version, versionedTicket.version);
+  historyDb.close();
+
+  const approvedVoucherOfferResponse = await request('/api/catalog', {
+    method: 'POST',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: {
+      category: 'FLIGHT',
+      title: 'Approved voucher generation test flight',
+      origin: 'MGQ',
+      destination: 'NBO',
+      price: 300,
+      available: 1,
+      travelDate: '2099-03-22',
+      specs: 'Confirmed itinerary test',
+      published: true
+    }
+  });
+  assert.equal(approvedVoucherOfferResponse.status, 201);
+  const approvedVoucherOffer = (await approvedVoucherOfferResponse.json()).product;
+  const approvedVoucherBookingResponse = await request('/api/bookings', {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      offerId: approvedVoucherOffer.id,
+      travelerName: 'Approval Voucher Traveler',
+      phone: '+252611234567',
+      paymentMethod: 'REQUEST_ONLY'
+    }
+  });
+  assert.equal(approvedVoucherBookingResponse.status, 201);
+  const approvedVoucherBooking = (await approvedVoucherBookingResponse.json()).booking;
+  const approvedVoucherResponse = await request(`/api/bookings/${approvedVoucherBooking.id}`, {
+    method: 'PATCH',
+    cookie: ticketAgencyCookie,
+    csrf: ticketAgencyCsrf,
+    body: { action: 'ACCEPT' }
+  });
+  assert.equal(approvedVoucherResponse.status, 200);
+  const approvedVoucherResult = await approvedVoucherResponse.json();
+  assert.equal(approvedVoucherResult.booking.state, 'ACCEPTED');
+  assert.equal(approvedVoucherResult.ticket.status, 'READY', 'agency approval with confirmed itinerary automatically creates the voucher');
+  assert.equal(approvedVoucherResult.ticketError, null);
+  const approvedVoucherBookings = await (await request('/api/bookings', { cookie: customerCookie })).json();
+  assert.equal(approvedVoucherBookings.bookings.find(item => item.id === approvedVoucherBooking.id).ticketStatus, 'READY',
+    'the automatically issued voucher appears in My Trips & Vouchers');
+  const approvedVoucherPdf = await request(`/api/bookings/${approvedVoucherBooking.id}/ticket.pdf?download=1`, { cookie: customerCookie });
+  assert.equal(approvedVoucherPdf.status, 200);
+  assert.equal(approvedVoucherPdf.headers.get('content-type'), 'application/pdf');
+  const approvedVoucherJpg = await request(`/api/bookings/${approvedVoucherBooking.id}/ticket.jpg?download=1`, { cookie: customerCookie });
+  assert.equal(approvedVoucherJpg.status, 200);
+  assert.equal(approvedVoucherJpg.headers.get('content-type'), 'image/jpeg');
+
   const leakedDatabase = await request('/data/safar-kaabe.sqlite');
   assert.equal(leakedDatabase.status, 404);
 
@@ -1296,7 +1598,9 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /navigator\.serviceWorker\.addEventListener\('controllerchange'/);
   assert.match(appMarkup, /updateViaCache: 'none'/);
   const serviceWorkerSource = await fs.readFile(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.match(serviceWorkerSource, /safar-kaabe-v76/);
+  assert.match(serviceWorkerSource, /safar-kaabe-v91/);
+  assert.match(appMarkup, /id="notificationsButton"/);
+  assert.match(appMarkup, /function enableWebPush()/);
   assert.match(appMarkup, /function toggleConversationFavorite\(id, event\)/);
   assert.match(appMarkup, /if \(travelDateInput\.value && travelDateInput\.value < today\) travelDateInput\.value = ''/);
   assert.doesNotMatch(appMarkup, /if \(!travelDateInput\.value \|\| travelDateInput\.value < today\) travelDateInput\.value = today/);
@@ -1381,9 +1685,47 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /item\.agencyId === agencyFilter/);
   assert.match(appMarkup, /Mogadishu[\s\S]*?Nairobi/);
   assert.match(appMarkup, /Trips update automatically about every 15 seconds/i);
+  assert.match(appMarkup, /role="tablist" aria-label="Filter travel offers by category"/);
+  assert.match(appMarkup, /function handleCategoryTabKeydown\(event\)/);
+  assert.match(appMarkup, /currentCategory === 'ALL' \|\| item\.category === currentCategory/);
   const serviceWorker = await request('/sw.js');
   assert.equal(serviceWorker.status, 200);
-  assert.match(await serviceWorker.text(), /const CACHE_NAME = 'safar-kaabe-v76'/);
+  const serviceWorkerText = await serviceWorker.text();
+  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v91'/);
+  assert.match(serviceWorkerText, /const CORE_FILES = \['\.\/', '\.\/the%20style\.html', '\.\/manifest\.webmanifest'\]/);
+  assert.match(serviceWorkerText, /Promise\.allSettled\(APP_FILES\.map\(path => cache\.add\(path\)\)\)/);
+  assert.doesNotMatch(serviceWorkerText, /'\.\/logo\.jpeg'/);
+  const deploymentConfig = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+  for (const functionConfig of Object.values(deploymentConfig.functions)) {
+    assert.match(functionConfig.includeFiles, /safar_kaabe_\*\.png/, 'all PWA icon assets are included in the Vercel function bundle');
+  }
+  assert.match(serviceWorkerText, /if \(request\.mode === 'navigate'\) \{\s*event\.respondWith\(fetch\(request\)/);
+  assert.match(appMarkup, /My Trips & Vouchers/);
+  assert.match(appMarkup, /id="myTripsSearch"/);
+  assert.match(appMarkup, /id="myTripsFilter"/);
+  assert.match(appMarkup, /Download JPG/);
+  assert.match(appMarkup, /downloadBookingDocument\(bookingId, type\)/);
+  assert.match(appMarkup, /async function fetchTicketDocumentBlob\(bookingId, type\)/);
+  assert.match(appMarkup, /credentials: 'same-origin'[\s\S]*?cache: 'no-store'/);
+  assert.match(appMarkup, /String\.fromCharCode\(\.\.\.signature\) === '%PDF-'/);
+  assert.match(appMarkup, /async function showTicketJpgFallback\(message\)/);
+  assert.match(appMarkup, /registration\.update\(\),\s*fetch\('\/api\/app-version'/);
+  assert.match(appMarkup, /fetch\('\/api\/app-version', \{ cache: 'no-store', credentials: 'same-origin' \}\)/);
+  assert.match(appMarkup, /previousRelease !== releaseId[\s\S]*?window\.location\.reload\(\)/,
+    'installed app reloads when the production deployment changes');
+  assert.match(appMarkup, /document\.addEventListener\('visibilitychange', \(\) => \{ void checkForAppUpdate\(\); \}\)/);
+  assert.match(appMarkup, /window\.setInterval\(\(\) => \{ void checkForAppUpdate\(\); \}, 5 \* 60 \* 1000\)/,
+    'installed app checks for remote releases every five minutes while visible');
+  assert.match(appMarkup, /Retry Voucher Generation/);
+  assert.match(appMarkup, /const result = await apiRequest\(`\/api\/bookings\/\$\{encodeURIComponent\(bookingId\)\}\/ticket\/generate`[\s\S]*?result\.ticket\?\.status === 'READY'[\s\S]*?await openBookingTicket\(bookingId\)/,
+    'successful ticket generation immediately opens the saved document preview');
+  assert.match(appMarkup, /openBookingPdf\(bookingId\)/);
+  assert.match(appMarkup, /zoomTicketPreview\(change\)/);
+  assert.match(appMarkup, /retryBookingTicketEmail\(bookingId\)/);
+  assert.match(appMarkup, /id="ticketPdfFrame"[^>]*onload="ticketPdfFrameLoaded\(\)"/);
+  assert.match(appMarkup, /id="ticketPdfRetryButton"/);
+  assert.match(appMarkup, /const realtime = await apiRequest\('\/api\/catalog\/realtime'\)[\s\S]*?if \(!realtime\.supported \|\| requestId !== notificationRealtimeRequestId \|\| !currentUser\) return;[\s\S]*?new EventSource\('\/api\/notifications\/stream'\)/,
+    'notification EventSource is only opened when the server supports persistent realtime connections');
   assert.match(appMarkup, /<img src="logo-mark\.png" alt="" aria-hidden="true" \/>/);
   assert.match(appMarkup, /apple-touch-icon" sizes="180x180" href="safar_kaabe_icon_180x180\.png"/);
   const appManifest = await (await request('/manifest.webmanifest')).json();
@@ -1394,8 +1736,13 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /<header id="appHeader"[^>]*>[\s\S]*?id="mobileMenuTrigger"/);
   assert.match(appMarkup, /id="headerSearchBar"/);
   assert.match(appMarkup, /id="mobileHeaderMessagesButton"/);
+  assert.match(appMarkup, /id="mobileHeaderNotificationsButton"[^>]*aria-label="Open notifications"/);
+  assert.match(appMarkup, /#mobileHeaderMessagesButton,\s*#mobileHeaderNotificationsButton \{ display: none !important; \}/,
+    'the large mobile-only header controls stay hidden on desktop');
   assert.match(appMarkup, /#appHeader > #headerSearchBar[\s\S]*?flex: 1 1 auto;/);
-  assert.match(appMarkup, /#appHeader > div:last-child > #mobileHeaderMessagesButton \{ display: flex !important; \}/);
+  assert.match(appMarkup, /#appHeader > div:last-child > #mobileHeaderMessagesButton,\s*#appHeader > div:last-child > #mobileHeaderNotificationsButton \{ display: flex !important; \}/);
+  assert.match(appMarkup, /#mobileHeaderNotificationsButton\[hidden\] \{ display: none !important; \}/);
+  assert.match(appMarkup, /id="mobileHeaderNotificationsBadge"/);
   assert.match(appMarkup, /#appHeader \{[\s\S]*?position: sticky;[\s\S]*?background: #071426;/);
   assert.match(appMarkup, /#appHeaderLogo \{ display: block; width: 2\.25rem; height: 2\.25rem;/);
   assert.match(appMarkup, /#appHeader \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: auto minmax\(0, 1fr\) auto;/);

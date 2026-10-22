@@ -14,8 +14,14 @@
   "dependencies": {
     "@capacitor/android": "^7.6.9",
     "@capacitor/core": "^7.6.9",
+    "@napi-rs/canvas": "^1.0.13",
     "@neondatabase/serverless": "^1.0.2",
     "nodemailer": "^10.1.7",
+    "pdfjs-dist": "^6.4.299",
+    "pdfkit": "^0.20.2",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5",
+    "web-push": "^3.6.7",
     "ws": "^8.18.3"
   },
   "devDependencies": {

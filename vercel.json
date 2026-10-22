@@ -2,11 +2,13 @@
   "functions": {
     "server.js": {
       "maxDuration": 15,
-      "includeFiles": "*.{html,jpg,jpeg,png,webmanifest,js}"
+      "includeFiles": "{the style.html,manifest.webmanifest,sw.js,logo-mark.png,safar_kaabe_*.png,image [1-9].jpg,node_modules/{pdfkit/js/standard-fonts/**,pdfjs-dist/standard_fonts/**,pdfjs-dist/legacy/build/pdf.worker.mjs}}",
+      "excludeFiles": "{**/data/**,.agents/**,.claude/**,.codex*,android/**,android-web/**,*.pdf,*.jpeg,WhatsApp Image*,all courts.jpg,dalxiis.jpg,hotel 1.jpg,man.jpg,SAFAR.png,tour 1.jpg,ttt.png,change the user traveral*}"
     },
     "api/[...path].js": {
       "maxDuration": 15,
-      "includeFiles": "*.{html,jpg,jpeg,png,webmanifest,js}"
+      "includeFiles": "{the style.html,manifest.webmanifest,sw.js,logo-mark.png,safar_kaabe_*.png,image [1-9].jpg,node_modules/{pdfkit/js/standard-fonts/**,pdfjs-dist/standard_fonts/**,pdfjs-dist/legacy/build/pdf.worker.mjs}}",
+      "excludeFiles": "{**/data/**,.agents/**,.claude/**,.codex*,android/**,android-web/**,*.pdf,*.jpeg,WhatsApp Image*,all courts.jpg,dalxiis.jpg,hotel 1.jpg,man.jpg,SAFAR.png,tour 1.jpg,ttt.png,change the user traveral*}"
     }
   },
   "rewrites": [

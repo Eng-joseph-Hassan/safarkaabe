@@ -153,9 +153,9 @@
       overflow: hidden;
       padding: max(1.5rem, env(safe-area-inset-top)) 1.5rem max(1.5rem, env(safe-area-inset-bottom));
       background:
-        radial-gradient(ellipse at 50% 35%, rgba(8, 45, 191, 0.25), transparent 53%),
-        radial-gradient(ellipse at 15% 90%, rgba(201, 0, 232, 0.12), transparent 35%),
-        rgba(5, 7, 11, 0.48);
+        radial-gradient(circle at 50% 34%, rgba(70, 126, 255, 0.32), transparent 28%),
+        radial-gradient(ellipse at 15% 90%, rgba(201, 0, 232, 0.18), transparent 35%),
+        linear-gradient(145deg, rgba(5, 7, 11, 0.98), rgba(8, 18, 42, 0.98) 54%, rgba(29, 9, 39, 0.96));
       -webkit-backdrop-filter: blur(18px) brightness(0.62) saturate(0.82);
       backdrop-filter: blur(18px) brightness(0.62) saturate(0.82);
       color: #f8fafc;
@@ -185,14 +185,27 @@
       text-align: center;
       transition: opacity 450ms ease, transform 450ms ease;
     }
-    .android-launch-splash { gap: 1rem; }
+    .android-launch-splash { position: relative; gap: 1rem; }
+    .android-launch-splash::before {
+      position: absolute;
+      z-index: -1;
+      width: min(78vw, 18rem);
+      aspect-ratio: 1;
+      border: 1px solid rgba(119, 162, 255, .34);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1.5rem rgba(80, 112, 255, .06), 0 0 5rem rgba(30, 95, 255, .26);
+      content: "";
+      animation: launch-ring-pulse 2.6s ease-in-out infinite;
+    }
+    @keyframes launch-ring-pulse { 0%, 100% { transform: scale(.96); opacity: .72; } 50% { transform: scale(1.04); opacity: 1; } }
     .android-launch-logo {
-      width: min(82vw, 19rem);
+      width: min(68vw, 15rem);
       aspect-ratio: 1;
       border-radius: 50%;
       background: #fff;
       object-fit: contain;
-      box-shadow: 0 18px 60px rgba(8, 45, 191, 0.25);
+      border: 5px solid rgba(255,255,255,.9);
+      box-shadow: 0 0 0 7px rgba(96, 142, 255, .18), 0 22px 70px rgba(8, 45, 191, 0.5);
     }
     .android-launch-brand {
       margin: 0;
@@ -266,7 +279,7 @@
       line-height: 1.08;
     }
     .android-welcome-title span {
-      background: linear-gradient(100deg, #e26aff, #8aa8ff 72%);
+      background: linear-gradient(100deg, #f18bff, #8aa8ff 72%);
       background-clip: text;
       color: transparent;
       -webkit-background-clip: text;
@@ -305,6 +318,8 @@
       color: #64748b;
       font-size: 0.7rem;
     }
+    #mobileHeaderMessagesButton,
+    #mobileHeaderNotificationsButton { display: none !important; }
     @keyframes android-plane-takeoff {
       0% { opacity: 0; transform: translate(-48vw, 26vh) rotate(-18deg) scale(0.8); }
       12% { opacity: 1; }
@@ -617,10 +632,12 @@
         background: rgba(2, 8, 20, 0.78);
       }
       #globalSearchInput { min-width: 0; }
-      #appHeader > div:last-child { width: auto; flex: 0 0 auto; gap: 0; }
+      #appHeader > div:last-child { width: auto; flex: 0 0 auto; gap: 0.5rem; }
       #appHeader > div:last-child > * { display: none !important; }
-      #appHeader > div:last-child > #mobileHeaderMessagesButton { display: flex !important; }
+      #appHeader > div:last-child > #mobileHeaderMessagesButton,
+      #appHeader > div:last-child > #mobileHeaderNotificationsButton { display: flex !important; }
       #mobileHeaderMessagesButton[hidden] { display: none !important; }
+      #mobileHeaderNotificationsButton[hidden] { display: none !important; }
       #mobileMenuTrigger[hidden] { display: none; }
       #mobileMenuTrigger { display: flex; }
       #mobileMenuTrigger i { display: block; }
@@ -701,7 +718,7 @@
     }
     #travelerBookingWorkspace {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 460px;
+      grid-template-columns: minmax(0, 1fr) 360px;
       align-items: start;
       gap: 2rem;
     }
@@ -709,9 +726,56 @@
     #bookingRequestPanel {
       position: sticky;
       top: 1.5rem;
-      border: 1px solid #1a2335;
-      background: #0d111a;
-      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, .7);
+      width: 100%;
+      max-width: 360px;
+      justify-self: end;
+      gap: .7rem !important;
+      padding: .75rem !important;
+      border: 1px solid #26344d;
+      border-radius: 1rem !important;
+      background: #0b101c;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, .7), inset 0 1px rgba(255, 255, 255, .025);
+    }
+    #bookingRequestPanel input:not([type="radio"]),
+    #bookingRequestPanel select {
+      min-height: 2.35rem;
+      border-color: #26344d;
+      border-radius: .55rem;
+      background: #080c14;
+      color: #e5edf9;
+      font-size: .68rem;
+    }
+    #bookingRequestPanel #selectedOfferBox {
+      min-height: 2.9rem;
+      padding: .65rem .75rem !important;
+      border-color: #26344d;
+      border-radius: .65rem;
+      background: #070b13;
+      font-size: .65rem;
+    }
+    #bookingRequestPanel #financialBreakdownBox {
+      min-height: 2.25rem;
+      padding: .65rem .75rem !important;
+      border-color: #26344d;
+      border-radius: .65rem;
+      background: #070b13;
+    }
+    #bookingRequestPanel #workflowActionButtons button {
+      min-height: 2.45rem;
+      border: 1px solid #26344d;
+      border-radius: .6rem;
+      font-size: .68rem;
+    }
+    #bookingRequestPanel [name="bookingPaymentMethod"] + span strong { font-size: .68rem; }
+    #bookingRequestPanel [name="bookingPaymentMethod"] + span { line-height: 1.35; }
+    #bookingRequestPanel label:has([name="bookingPaymentMethod"]) {
+      border-color: #26344d;
+      border-radius: .6rem;
+      background: #111827;
+    }
+    @media (max-width: 1023px) {
+      #travelerBookingWorkspace { grid-template-columns: minmax(0, 1fr); }
+      #bookingRequestPanel { position: static; max-width: none; justify-self: stretch; }
     }
     #catalogContainer { gap: .875rem; }
     #catalogContainer .travel-offer-card {
@@ -740,7 +804,156 @@
       background: #0d111a;
       box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
     }
+    .agency-bookings-shell {
+      overflow: hidden;
+      border: 1px solid rgba(148, 163, 184, .16) !important;
+      border-radius: 1.25rem !important;
+      background: linear-gradient(145deg, rgba(18, 24, 37, .94), rgba(7, 11, 19, .98)) !important;
+      box-shadow: 0 24px 55px -32px rgba(0, 0, 0, .95), inset 0 1px rgba(255, 255, 255, .04);
+    }
+    .agency-bookings-table { table-layout: fixed; min-width: 1180px; }
+    .agency-bookings-table th:nth-child(7),
+    .agency-bookings-table td[data-label="Status and actions"] { width: 320px; min-width: 320px; }
+    .agency-bookings-table thead { background: linear-gradient(90deg, rgba(30, 41, 59, .78), rgba(15, 23, 42, .94)) !important; }
+    .agency-bookings-table thead th {
+      padding: .95rem .9rem !important;
+      border-bottom: 1px solid rgba(148, 163, 184, .14);
+      color: #a8b8d0;
+      font-size: .62rem;
+      letter-spacing: .08em;
+      line-height: 1.35;
+    }
+    .agency-bookings-table thead th:nth-child(1) { width: 11%; }
+    .agency-bookings-table thead th:nth-child(2) { width: 19%; }
+    .agency-bookings-table thead th:nth-child(3) { width: 16%; }
+    .agency-bookings-table thead th:nth-child(4) { width: 13%; }
+    .agency-bookings-table thead th:nth-child(5) { width: 13%; }
+    .agency-bookings-table thead th:nth-child(6) { width: 14%; }
+    .agency-bookings-table thead th:nth-child(7) { width: 14%; }
+    .agency-bookings-table tbody tr { background: rgba(4, 8, 15, .42); transition: background-color .18s ease, box-shadow .18s ease; }
+    .agency-bookings-table tbody tr:nth-child(even) { background: rgba(20, 27, 40, .42); }
+    .agency-bookings-table tbody tr:hover { background: rgba(37, 55, 86, .42); box-shadow: inset 3px 0 #5b8dff; }
+    .agency-bookings-table tbody td { padding: 1.05rem .9rem !important; border-color: rgba(148, 163, 184, .13) !important; color: #edf3ff; vertical-align: middle; overflow-wrap: anywhere; }
+    .agency-bookings-table tbody td:first-child { color: #72a9ff; }
+    .agency-booking-row-actions {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: end;
+      gap: .55rem;
+      min-width: max-content;
+      white-space: nowrap;
+    }
+    .agency-booking-row-actions > * { min-width: 0; }
+    .agency-booking-row-actions .booking-approve-button,
+    .agency-booking-row-actions .booking-undo-button { white-space: nowrap; }
+    .booking-approve-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.2rem;
+      padding: .55rem .75rem;
+      border: 1px solid rgba(52, 211, 153, .38);
+      border-radius: .7rem;
+      background: #22c55e !important;
+      color: #03251b !important;
+      box-shadow: 0 8px 18px -12px rgba(52, 211, 153, .9);
+      font-size: .65rem;
+      font-weight: 800;
+      transition: transform .18s ease, filter .18s ease;
+    }
+    .booking-approve-button:hover { background: #4ade80 !important; filter: brightness(1.05); transform: translateY(-1px); }
+    .booking-undo-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.2rem;
+      padding: .55rem .75rem;
+      border: 1px solid rgba(251, 191, 36, .42);
+      border-radius: .7rem;
+      background: #3a2a0d !important;
+      color: #fde68a !important;
+      font-size: .65rem;
+      font-weight: 800;
+      transition: background-color .18s ease, transform .18s ease;
+    }
+    .booking-undo-button:hover { background: #5a3d0d !important; transform: translateY(-1px); }
+    .booking-more-button {
+      min-height: 2.2rem;
+      min-width: 2.2rem;
+      border: 1px solid rgba(148, 163, 184, .25) !important;
+      border-radius: .7rem;
+      background: rgba(255, 255, 255, .07) !important;
+      color: #d9e5ff !important;
+      transition: background-color .18s ease, border-color .18s ease, transform .18s ease;
+    }
+    .booking-more-button:hover { border-color: #6f9dff !important; background: rgba(91, 141, 255, .2) !important; transform: translateY(-1px); }
+    .agency-booking-menu-panel {
+      position: fixed;
+      z-index: 90;
+      width: 14rem;
+      padding: .35rem;
+      border: 1px solid rgba(148, 163, 184, .22);
+      border-radius: .85rem;
+      background: #111827;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .03);
+    }
+    .agency-booking-menu-item {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: .65rem;
+      border-radius: .6rem;
+      padding: .62rem .7rem;
+      color: #d8e2f1;
+      font-size: .68rem;
+      font-weight: 700;
+      text-align: left;
+      transition: background-color .15s ease, color .15s ease;
+    }
+    .agency-booking-menu-item:hover { background: rgba(96, 165, 250, .15); color: #fff; }
+    .agency-booking-menu-item i { width: 1rem; color: #8db5ff; text-align: center; }
+    .agency-booking-menu-item.approve i { color: #4ade80; }
+    .agency-booking-menu-item.undo i { color: #facc15; }
+    .agency-booking-menu-item.danger { color: #fda4af; }
+    .agency-booking-menu-item.danger i { color: #fb7185; }
+    .agency-booking-icon-button {
+      display: inline-grid;
+      min-height: 2.2rem;
+      min-width: 2.2rem;
+      place-items: center;
+      border: 1px solid rgba(148, 163, 184, .12);
+      border-radius: .7rem;
+      background: rgba(255, 255, 255, .065);
+      color: #b7c4d9;
+      transition: background-color .18s ease, color .18s ease, transform .18s ease;
+    }
+    .agency-booking-icon-button:hover { background: rgba(96, 165, 250, .18); color: #fff; transform: translateY(-1px); }
+    .agency-booking-icon-button.danger:hover { background: rgba(244, 63, 94, .18); color: #fda4af; }
+    .agency-new-booking-button {
+      background: linear-gradient(135deg, #06b6d4, #2563eb) !important;
+      box-shadow: 0 10px 24px -14px rgba(34, 211, 238, .95);
+      transition: filter .18s ease, transform .18s ease;
+    }
+    .agency-new-booking-button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    #popularRoutesSection > div:last-child > button {
+      border-color: rgba(217, 70, 239, .82) !important;
+      background: #111827 !important;
+      box-shadow: 0 0 18px rgba(217, 70, 239, .08);
+      transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    #popularRoutesSection > div:last-child > button:hover {
+      border-color: #f0abfc !important;
+      background: rgba(217, 70, 239, .08) !important;
+      box-shadow: 0 0 24px rgba(217, 70, 239, .16);
+      transform: translateY(-1px);
+    }
+    #popularRoutesSection > div:last-child > button > span > span:first-child span,
+    #popularRoutesSection > div:last-child > button > i { color: #e879f9 !important; }
+    #popularRoutesSection > div:first-child p { color: #e879f9 !important; }
     @media (max-width: 639px) {
+      #view_AGENCY .agency-bookings-table th:nth-child(7),
+      #view_AGENCY .agency-bookings-table td[data-label="Status and actions"] { width: auto; min-width: 0; }
+      #view_AGENCY .agency-booking-row-actions { justify-content: start; }
       #view_AGENCY .agency-dashboard-panel { padding: 1rem; border-radius: 1.25rem; }
       #view_AGENCY .agency-dashboard-heading { align-items: stretch; gap: 1rem; }
       #view_AGENCY .agency-dashboard-heading > div:last-child { flex: 1 1 100%; width: 100%; }
@@ -750,7 +963,7 @@
       #view_AGENCY #agencyKpiGrid > div { min-width: 0; padding: .85rem; overflow-wrap: anywhere; }
       #view_AGENCY .agency-dashboard-tabs > button { flex: 1 1 9rem; min-height: 2.75rem; padding-inline: .65rem; }
       #view_AGENCY .agency-bookings-scroller { overflow: visible; border: 0; background: transparent; }
-      #view_AGENCY .agency-bookings-table { display: block; width: 100%; }
+      #view_AGENCY .agency-bookings-table { display: block; width: 100%; min-width: 0; }
       #view_AGENCY .agency-bookings-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
       #view_AGENCY #agencyBookingsTableBody { display: grid; gap: .75rem; border: 0; }
       #view_AGENCY #agencyBookingsTableBody > tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem .85rem; padding: .9rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1rem; background: rgba(0,0,0,.42); }
@@ -763,7 +976,7 @@
       #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(7) { grid-column: 1 / -1; }
       #view_AGENCY #agencyBookingsTableBody > tr > td:nth-child(7) { padding-top: .7rem; border-top: 1px solid rgba(255,255,255,.08); }
       #view_AGENCY #agencyBookingsTableBody > tr > td[colspan] { grid-column: 1 / -1; align-items: center; padding: .5rem; text-align: center; }
-      #view_AGENCY .agency-booking-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+      #view_AGENCY .agency-booking-row-actions { display: inline-flex !important; align-items: center; gap: .5rem; }
       #view_AGENCY .agency-booking-row-actions > button { min-height: 2.75rem; }
     }
     @media (max-width: 1100px) {
@@ -1134,7 +1347,7 @@
           <i class="fa-solid fa-compass w-4 text-center"></i> Traveler Discovery & Search
         </button>
         <button onclick="openMyTripsModal()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
-          <i class="fa-solid fa-suitcase-rolling w-4 text-center"></i> My Bookings & Vouchers
+          <i class="fa-solid fa-ticket w-4 text-center"></i> My Trips & Vouchers
           <span id="sidebarTripsBadge" class="ml-auto bg-blue-500/20 text-blue-300 font-mono-code text-[10px] px-2 py-0.5 rounded-full">1</span>
         </button>
       </div>
@@ -1218,6 +1431,10 @@
               <i class="fa-solid fa-comments" aria-hidden="true"></i>
               <span id="messagesUnreadBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
             </button>
+            <button id="notificationsButton" onclick="toggleNotificationCenter(event)" class="hidden relative h-9 w-10 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20" type="button" aria-label="Notifications" title="Notifications" aria-expanded="false">
+              <i class="fa-solid fa-bell" aria-hidden="true"></i>
+              <span id="notificationsUnreadBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
+            </button>
             <button id="signOutButton" onclick="signOut()" class="hidden h-9 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-[11px] font-semibold text-slate-300 hover:bg-white/10" type="button" aria-label="Sign out" title="Sign out">
               <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Sign out</span>
             </button>
@@ -1230,9 +1447,13 @@
         </div>
 
         <div class="flex w-full items-center justify-end gap-2 text-xs sm:ml-auto sm:w-auto sm:flex-wrap sm:gap-3">
-          <button id="mobileHeaderMessagesButton" onclick="openMessagingCenter()" class="relative h-11 w-11 items-center justify-center rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20" type="button" aria-label="Open chats" title="Open chats" hidden>
-            <i class="fa-solid fa-comments text-base" aria-hidden="true"></i>
+          <button id="mobileHeaderMessagesButton" onclick="openMessagingCenter()" class="relative h-14 w-14 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20" type="button" aria-label="Open chats" title="Open chats" hidden>
+            <i class="fa-solid fa-comments text-lg" aria-hidden="true"></i>
             <span id="mobileHeaderMessagesBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
+          </button>
+          <button id="mobileHeaderNotificationsButton" onclick="toggleNotificationCenter(event)" class="relative h-14 w-14 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20" type="button" aria-label="Open notifications" title="Open notifications" aria-expanded="false" hidden>
+            <i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
+            <span id="mobileHeaderNotificationsBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
           </button>
           <button id="installAppButton" onclick="installApp()" class="hidden rounded-xl border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-[11px] font-bold text-blue-200 hover:bg-blue-500/25" type="button">
             <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Install app</span><span class="sm:hidden">Install</span>
@@ -1253,6 +1474,15 @@
           </select>
         </div>
       </header>
+
+      <section id="notificationPopover" class="hidden fixed right-4 top-20 z-[90] w-[min(25rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#101827] shadow-2xl" role="dialog" aria-label="Notifications">
+        <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div><h2 class="text-sm font-extrabold text-white">Notifications</h2><p id="notificationSummary" class="mt-0.5 text-[10px] text-slate-400">Your latest booking updates</p></div>
+          <div class="flex items-center gap-1"><button onclick="markAllNotificationsRead()" class="rounded-lg px-2 py-1.5 text-[10px] font-bold text-blue-300 hover:bg-white/10" type="button">Mark all read</button><button onclick="closeNotificationCenter()" class="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white" type="button" aria-label="Close notifications"><i class="fa-solid fa-xmark"></i></button></div>
+        </div>
+        <div id="notificationList" class="max-h-[min(26rem,70vh)] overflow-y-auto"></div>
+        <div class="border-t border-white/10 p-3"><button id="enablePushButton" onclick="enableWebPush()" class="w-full rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20" type="button"><i class="fa-solid fa-bell mr-1"></i> Enable device notifications</button></div>
+      </section>
 
       <section id="sharedExploreSection" class="w-full" aria-label="Travel inspiration for all users">
         <div id="globalExploreCarouselHost" class="w-full"></div>
@@ -1342,7 +1572,7 @@
             <div><p class="text-[10px] font-bold uppercase tracking-[.16em] text-emerald-300">Start with a popular route</p><h3 id="popularRoutesHeading" class="mt-1 text-sm font-extrabold text-white">Somalia · Kenya · beyond</h3></div>
             <span class="text-[10px] text-slate-500">Shows offers published by participating agencies</span>
           </div>
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div id="popularRoutesGrid" class="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <button type="button" onclick="selectPopularRoute('MGQ','NBO')" class="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[.035] px-4 py-3 text-left hover:border-emerald-400/30 hover:bg-emerald-500/[.06]"><span><span class="block text-xs font-bold text-white">Mogadishu <span class="text-emerald-300">→</span> Nairobi</span><span class="mt-1 block text-[10px] text-slate-400">MGQ · NBO</span></span><i class="fa-solid fa-arrow-right text-emerald-300" aria-hidden="true"></i></button>
             <button type="button" onclick="selectPopularRoute('HGA','NBO')" class="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[.035] px-4 py-3 text-left hover:border-emerald-400/30 hover:bg-emerald-500/[.06]"><span><span class="block text-xs font-bold text-white">Hargeisa <span class="text-emerald-300">→</span> Nairobi</span><span class="mt-1 block text-[10px] text-slate-400">HGA · NBO</span></span><i class="fa-solid fa-arrow-right text-emerald-300" aria-hidden="true"></i></button>
             <button type="button" onclick="selectPopularRoute('MGQ','DXB')" class="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[.035] px-4 py-3 text-left hover:border-emerald-400/30 hover:bg-emerald-500/[.06]"><span><span class="block text-xs font-bold text-white">Mogadishu <span class="text-emerald-300">→</span> Dubai</span><span class="mt-1 block text-[10px] text-slate-400">MGQ · DXB</span></span><i class="fa-solid fa-arrow-right text-emerald-300" aria-hidden="true"></i></button>
@@ -1350,26 +1580,26 @@
         </section>
 
         <!-- 6 Categories -->
-        <div class="flex flex-wrap gap-2 pb-2" id="categoryTabs">
-          <button onclick="selectCategory('ALL')" id="cat_ALL" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-400 to-blue-500 text-black shadow-lg shadow-blue-500/20">
+        <div class="flex gap-2 overflow-x-auto rounded-2xl border border-white/5 bg-[#111] p-2 pb-3" id="categoryTabs" role="tablist" aria-label="Filter travel offers by category" onkeydown="handleCategoryTabKeydown(event)">
+          <button type="button" role="tab" aria-selected="true" aria-controls="catalogContainer" tabindex="0" onclick="selectCategory('ALL')" id="cat_ALL" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-400 to-blue-500 text-black shadow-lg shadow-blue-500/20">
             <i class="fa-solid fa-layer-group mr-1.5"></i> All trips
           </button>
-          <button onclick="selectCategory('FLIGHT')" id="cat_FLIGHT" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('FLIGHT')" id="cat_FLIGHT" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-plane-up mr-1.5 text-blue-400"></i> Flights
           </button>
-          <button onclick="selectCategory('HOTEL')" id="cat_HOTEL" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('HOTEL')" id="cat_HOTEL" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-hotel mr-1.5 text-amber-400"></i> Hotels
           </button>
-          <button onclick="selectCategory('CAR')" id="cat_CAR" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('CAR')" id="cat_CAR" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-car-side mr-1.5 text-sky-400"></i> Car Rental
           </button>
-          <button onclick="selectCategory('TOUR')" id="cat_TOUR" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('TOUR')" id="cat_TOUR" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-compass mr-1.5 text-rose-400"></i> Tours
           </button>
-          <button onclick="selectCategory('TRANSFER')" id="cat_TRANSFER" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('TRANSFER')" id="cat_TRANSFER" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-van-shuttle mr-1.5 text-fuchsia-400"></i> Transfers
           </button>
-          <button onclick="selectCategory('PACKAGE')" id="cat_PACKAGE" class="cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
+          <button type="button" role="tab" aria-selected="false" aria-controls="catalogContainer" tabindex="-1" onclick="selectCategory('PACKAGE')" id="cat_PACKAGE" class="cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10">
             <i class="fa-solid fa-cubes mr-1.5 text-blue-300"></i> Packages
           </button>
         </div>
@@ -1446,7 +1676,7 @@
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-2 px-1">
-          <p class="text-[10px] leading-relaxed text-slate-400">Choose a travel company to see only its available trips. Airport codes are shown after city names, for example Mogadishu (MGQ).</p>
+          <p class="text-[10px] leading-relaxed text-slate-400">Choose a travel company to see only its available trips. Airport codes use three letters and are shown after city names, for example Mogadishu (MGQ). Trips update automatically about every 15 seconds.</p>
           <button type="button" onclick="clearTravelSearchFilters()" class="rounded-lg border border-white/10 px-3 py-2 text-[10px] font-bold text-slate-300 hover:border-white/25 hover:text-white">Clear filters</button>
         </div>
 
@@ -1474,8 +1704,8 @@
                 </select>
               </label>
             </div>
-            <p id="travelOffersUpdateStatus" class="px-1 text-[10px] leading-relaxed text-slate-500">Loading available trips…</p>
-            <div id="catalogContainer" class="space-y-3.5"></div>
+            <p id="travelOffersUpdateStatus" class="px-1 text-[10px] leading-relaxed text-slate-500">Trips update automatically about every 15 seconds while this page is open.</p>
+            <div id="catalogContainer" class="space-y-3.5" role="tabpanel" aria-labelledby="cat_ALL" tabindex="0"></div>
           </div>
 
           <div class="traveler-booking-column">
@@ -1566,8 +1796,27 @@
           <div id="agencySubView_OVERVIEW" class="space-y-6">
             <div id="agencyKpiGrid" class="grid grid-cols-1 sm:grid-cols-4 gap-4"></div>
             <div>
-              <h3 class="text-sm font-bold text-white mb-3">Company Bookings & Requests</h3>
-              <div class="agency-bookings-scroller overflow-x-auto border border-white/10 rounded-2xl bg-black/40">
+              <div class="mb-4 flex flex-wrap items-end justify-between gap-3 px-1">
+                <div>
+                  <h3 class="text-lg font-extrabold tracking-tight text-white">Company Bookings & Requests</h3>
+                  <p class="mt-1 text-xs text-slate-400">Manage client reservations, approvals, and commission details.</p>
+                </div>
+                <div class="flex w-full items-center gap-2 sm:w-auto">
+                  <label class="relative min-w-0 flex-1 sm:w-64" aria-label="Search bookings">
+                    <i class="fa-solid fa-magnifying-glass pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500" aria-hidden="true"></i>
+                    <input id="agencyBookingSearch" type="search" oninput="setAgencyBookingSearch(this.value)" placeholder="Search bookings..." class="obsidian-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs" />
+                  </label>
+                  <button type="button" onclick="startNewAgencyBooking()" class="agency-new-booking-button shrink-0 rounded-xl px-4 py-2.5 text-xs font-extrabold text-white"><i class="fa-solid fa-plus mr-1.5" aria-hidden="true"></i>New Booking</button>
+                  <span id="agencyBookingsCount" class="hidden">0 booking items</span>
+                </div>
+                <div class="flex w-full flex-wrap items-center gap-2" aria-label="Booking filters">
+                  <label class="min-w-[9rem] flex-1 sm:flex-none"><span class="sr-only">Booking status</span><select id="agencyBookingStatusFilter" onchange="setAgencyBookingStatusFilter(this.value)" class="obsidian-input w-full rounded-xl px-3 py-2.5 text-xs"><option value="ALL">All statuses</option><option value="REQUESTED">Requested</option><option value="PAYMENT_PENDING">Payment pending</option><option value="PAYMENT_RECEIVED">Payment received</option><option value="ACCEPTED">Approved</option><option value="REJECTED">Rejected</option></select></label>
+                  <label class="min-w-[9rem] flex-1 sm:flex-none"><span class="sr-only">From date</span><input id="agencyBookingFromDate" type="date" onchange="setAgencyBookingDateFilter('from', this.value)" class="obsidian-input w-full rounded-xl px-3 py-2.5 text-xs" aria-label="From date"></label>
+                  <label class="min-w-[9rem] flex-1 sm:flex-none"><span class="sr-only">To date</span><input id="agencyBookingToDate" type="date" onchange="setAgencyBookingDateFilter('to', this.value)" class="obsidian-input w-full rounded-xl px-3 py-2.5 text-xs" aria-label="To date"></label>
+                  <label class="min-w-[10rem] flex-1 sm:flex-none"><span class="sr-only">Sort bookings</span><select id="agencyBookingSort" onchange="setAgencyBookingSort(this.value)" class="obsidian-input w-full rounded-xl px-3 py-2.5 text-xs"><option value="NEWEST">Newest first</option><option value="OLDEST">Oldest first</option><option value="TRAVEL_DATE">Travel date</option><option value="TRAVELER">Traveler name</option><option value="TOTAL_DESC">Highest total</option></select></label>
+                </div>
+              </div>
+              <div class="agency-bookings-scroller agency-bookings-shell overflow-x-auto">
                 <table class="agency-bookings-table w-full text-left text-xs">
                   <thead class="bg-white/5 text-slate-400 uppercase font-mono-code text-[11px]">
                     <tr>
@@ -1582,6 +1831,10 @@
                   </thead>
                   <tbody id="agencyBookingsTableBody" class="divide-y divide-white/10"></tbody>
                 </table>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center justify-between gap-3 px-1 text-[10px] text-slate-500">
+                <span id="agencyBookingsPageLabel">Page 1</span>
+                <div class="flex items-center gap-2"><button type="button" onclick="changeAgencyBookingPage(-1)" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-bold text-slate-300 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous bookings page">Previous</button><button type="button" onclick="changeAgencyBookingPage(1)" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-bold text-slate-300 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next bookings page">Next</button></div>
               </div>
             </div>
           </div>
@@ -1858,7 +2111,7 @@
       <div class="flex items-center justify-between border-b border-white/10 pb-4 no-print">
         <div>
           <h3 class="text-lg font-extrabold text-white">My Trips & Vouchers</h3>
-          <p class="text-xs text-slate-400">Offline cached travel vouchers and invoices.</p>
+          <p class="text-xs text-slate-400">Your approved trips, booking confirmations, and travel documents.</p>
         </div>
         <div class="flex items-center gap-2">
           <button onclick="window.print()" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-400 to-blue-500 text-black text-xs font-extrabold">
@@ -1869,7 +2122,23 @@
           </button>
         </div>
       </div>
+      <div class="grid grid-cols-1 gap-2 border-b border-white/10 pb-4 sm:grid-cols-[1fr_11rem]">
+        <label class="sr-only" for="myTripsSearch">Search trips</label>
+        <input id="myTripsSearch" type="search" oninput="renderMyTrips()" placeholder="Search reference, agency, route..." class="obsidian-input rounded-xl px-3 py-2.5 text-xs" />
+        <label class="sr-only" for="myTripsFilter">Filter trips</label>
+        <select id="myTripsFilter" onchange="renderMyTrips()" class="obsidian-input rounded-xl px-3 py-2.5 text-xs"><option value="ALL">All trips</option><option value="UPCOMING">Upcoming</option><option value="PENDING">Pending approval</option><option value="ACCEPTED">Approved</option><option value="VOUCHER">Voucher ready</option><option value="PAST">Past trips</option></select>
+      </div>
       <div id="myTripsContainer" class="space-y-4"></div>
+    </div>
+  </div>
+
+  <div id="ticketPreviewModal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/85 p-3 backdrop-blur-md sm:p-6" role="dialog" aria-modal="true" aria-labelledby="ticketPreviewTitle">
+    <div class="flex h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-blue-400/20 bg-[#101827] shadow-2xl">
+      <div class="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6">
+        <div><h2 id="ticketPreviewTitle" class="text-sm font-extrabold text-white">Booking confirmation</h2><p class="mt-1 text-[10px] text-slate-400">Agency-approved confirmation · Not an airline e-ticket</p></div>
+        <div class="flex flex-wrap items-center justify-end gap-2 no-print"><button type="button" onclick="zoomTicketPreview(-20)" class="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-white/5 text-white" aria-label="Zoom out">−</button><button type="button" onclick="zoomTicketPreview(20)" class="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-white/5 text-white" aria-label="Zoom in">+</button><a id="ticketOpenPdfButton" href="#" target="_blank" rel="noopener" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[10px] font-bold text-slate-200 hover:bg-white/10">Open PDF</a><a id="ticketDownloadButton" href="#" download class="rounded-xl bg-blue-500 px-3 py-2 text-[10px] font-extrabold text-white hover:bg-blue-400"><i class="fa-solid fa-file-pdf mr-1"></i>Download PDF</a><a id="ticketJpgDownloadButton" href="#" download class="rounded-xl bg-fuchsia-500/15 px-3 py-2 text-[10px] font-extrabold text-fuchsia-200 hover:bg-fuchsia-500/25"><i class="fa-solid fa-image mr-1"></i>Download JPG</a><button type="button" onclick="printTicketPreview()" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[10px] font-bold text-slate-200 hover:bg-white/10"><i class="fa-solid fa-print mr-1"></i>Print</button><button type="button" onclick="closeTicketPreview()" class="grid h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-slate-300 hover:bg-white/10" aria-label="Close ticket preview"><i class="fa-solid fa-xmark"></i></button></div>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto bg-slate-200 p-2 sm:p-5"><div class="flex items-center gap-2 px-2 py-1"><p id="ticketPdfStatus" class="text-xs text-slate-700" role="status">Loading saved ticket PDF…</p><button id="ticketPdfRetryButton" type="button" onclick="reloadTicketPdf()" class="hidden rounded-lg bg-rose-100 px-2 py-1 text-xs font-bold text-rose-800">Retry preview</button></div><iframe id="ticketPdfFrame" title="Booking confirmation PDF preview" class="h-[calc(100%-2.5rem)] min-h-[28rem] w-full rounded-xl bg-white" loading="lazy" onload="ticketPdfFrameLoaded()" onerror="ticketPdfFrameError()"></iframe><img id="ticketJpgFallback" class="hidden mx-auto max-h-full max-w-full rounded-xl bg-white object-contain shadow-xl" alt="Saved booking confirmation JPG preview" /></div>
     </div>
   </div>
 
@@ -2087,6 +2356,7 @@
       <div class="space-y-2">
         <button type="button" onclick="viewActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-regular fa-eye mr-2 text-blue-300"></i>View booking details</button>
         <button id="agencyBookingEditAction" type="button" onclick="editActiveAgencyBooking()" class="w-full rounded-xl bg-white/[.05] px-4 py-3 text-left text-xs font-bold text-slate-100"><i class="fa-solid fa-pen mr-2 text-blue-300"></i>Edit traveler details</button>
+        <button id="agencyBookingApproveAction" type="button" onclick="approveActiveAgencyBooking()" class="w-full rounded-xl bg-emerald-500/10 px-4 py-3 text-left text-xs font-bold text-emerald-200"><i class="fa-solid fa-check mr-2"></i>Approve request</button>
         <button id="agencyBookingUndoAcceptanceAction" type="button" onclick="undoActiveAgencyBookingAcceptance()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-rotate-left mr-2"></i>Undo acceptance</button>
         <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i><span id="agencyBookingCancelActionLabel">Delete request</span></button>
         <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">The canceled request stays in booking history. Seats return to inventory when the ticket has not been issued.</p>
@@ -2143,6 +2413,13 @@
     let deferredInstallPrompt = null;
     let currentUser = null;
     let activeAgencyBookingId = null;
+    let agencyBookingSearchQuery = '';
+    let agencyBookingStatusFilter = 'ALL';
+    let agencyBookingFromDate = '';
+    let agencyBookingToDate = '';
+    let agencyBookingSort = 'NEWEST';
+    let agencyBookingPage = 1;
+    const agencyBookingPageSize = 8;
     let setupRequired = false;
     let setupTokenRequired = false;
     let authMode = 'login';
@@ -2183,6 +2460,15 @@
     let conversationRefreshInProgress = false;
     let conversationInboxRefreshTimer = null;
     let conversationInboxRefreshInProgress = false;
+    let notifications = [];
+    let notificationPollTimer = null;
+    let notificationRefreshInProgress = false;
+    let notificationEventSource = null;
+    let notificationRealtimeRequestId = 0;
+    let notificationCenterOpen = false;
+    let knownNotificationIds = new Set();
+    let notificationSoundEnabled = true;
+    let notificationAudioContext = null;
     let customerOfferRefreshTimer = null;
     let customerOfferRefreshEventsInstalled = false;
     let customerOfferRefreshInProgress = false;
@@ -2223,6 +2509,11 @@
     let selectedOffer = null;
 
     let BOOKINGS = [];
+    let ticketPdfPreviewUrl = '';
+    let ticketDocumentObjectUrl = '';
+    let ticketJpgObjectUrl = '';
+    let ticketPreviewBookingId = '';
+    let ticketZoomPercentage = 100;
 
     let AUDIT_LOGS = [];
 
@@ -2569,7 +2860,10 @@
       document.getElementById('adminDashboardButton').classList.add('hidden');
       document.getElementById('profileSettingsButton').classList.add('hidden');
       document.getElementById('messagesButton').classList.add('hidden');
+      document.getElementById('notificationsButton').classList.add('hidden');
       document.getElementById('mobileHeaderMessagesButton').hidden = true;
+      document.getElementById('mobileHeaderNotificationsButton').hidden = true;
+      stopNotificationUpdates();
       closeMessagingCenter();
       closeMobileMenu();
       document.getElementById('mobileMenuRole').textContent = 'Signed out';
@@ -2604,7 +2898,9 @@
       document.getElementById('profileSettingsButton').classList.remove('hidden');
       document.getElementById('adminDashboardButton').classList.toggle('hidden', currentUser.role !== 'SUPER_ADMIN');
       document.getElementById('messagesButton').classList.remove('hidden');
+      document.getElementById('notificationsButton').classList.remove('hidden');
       document.getElementById('mobileHeaderMessagesButton').hidden = false;
+      document.getElementById('mobileHeaderNotificationsButton').hidden = false;
       document.getElementById('mobileMenuTrigger').hidden = false;
       document.getElementById('mobileMenuTrigger').classList.remove('hidden');
       document.getElementById('mobileMenuRole').textContent = currentUser.role === 'SUPER_ADMIN'
@@ -2661,6 +2957,9 @@
         showToast('Messages could not be loaded.');
       }
       startConversationInboxRefresh();
+      await loadNotificationPreferences();
+      await loadNotifications(false);
+      startNotificationUpdates();
     }
 
     async function startGuestApp() {
@@ -2696,7 +2995,10 @@
       document.getElementById('profileSettingsButton').classList.add('hidden');
       document.getElementById('adminDashboardButton').classList.add('hidden');
       document.getElementById('messagesButton').classList.add('hidden');
+      document.getElementById('notificationsButton').classList.add('hidden');
       document.getElementById('mobileHeaderMessagesButton').hidden = true;
+      document.getElementById('mobileHeaderNotificationsButton').hidden = true;
+      stopNotificationUpdates();
       document.getElementById('mobileMenuTrigger').hidden = false;
       document.getElementById('mobileMenuTrigger').classList.remove('hidden');
 
@@ -3015,10 +3317,197 @@
       }, 15000);
     }
 
+    function updateNotificationBadges(unreadCount) {
+      const count = Number(unreadCount || 0);
+      for (const id of ['notificationsUnreadBadge', 'mobileHeaderNotificationsBadge']) {
+        const badge = document.getElementById(id);
+        if (!badge) continue;
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.classList.toggle('hidden', count === 0);
+      }
+    }
+
+    function playNotificationSound() {
+      if (!notificationSoundEnabled) return;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        notificationAudioContext ||= new AudioContextClass();
+        const context = notificationAudioContext;
+        if (context.state === 'suspended') context.resume().catch(() => {});
+        const now = context.currentTime;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(740, now);
+        oscillator.frequency.exponentialRampToValueAtTime(1040, now + 0.09);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start(now);
+        oscillator.stop(now + 0.25);
+      } catch (error) { console.debug('Notification sound unavailable.', error); }
+    }
+
+    async function loadNotificationPreferences() {
+      if (!currentUser) return;
+      try {
+        const preferences = await apiRequest('/api/notification-preferences');
+        notificationSoundEnabled = preferences.soundEnabled !== false;
+      } catch (error) { console.warn('Notification preferences could not be loaded.', error); }
+    }
+
+    function renderNotificationCenter() {
+      const list = document.getElementById('notificationList');
+      if (!list) return;
+      document.getElementById('notificationSummary').textContent = notifications.length ? `${notifications.filter(item => !item.readAt).length} unread notification${notifications.filter(item => !item.readAt).length === 1 ? '' : 's'}` : 'No new notifications';
+      list.innerHTML = notifications.length ? notifications.map(item => `
+        <button type="button" onclick="openNotification('${escapeHtml(item.id)}')" class="flex w-full gap-3 border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/5 ${item.readAt ? 'opacity-70' : 'bg-blue-500/5'}">
+          <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl ${item.type === 'BOOKING_REQUEST' ? 'bg-blue-500/15 text-blue-300' : 'bg-emerald-500/15 text-emerald-300'}"><i class="fa-solid ${item.type === 'BOOKING_REQUEST' ? 'fa-ticket' : 'fa-message'} text-xs"></i></span>
+          <span class="min-w-0 flex-1"><span class="flex items-center justify-between gap-2"><strong class="truncate text-xs text-white">${escapeHtml(item.title)}</strong><span class="shrink-0 text-[9px] text-slate-500">${escapeHtml(formatBookingDateTime(item.createdAt))}</span></span><span class="mt-1 block text-[11px] leading-4 text-slate-300">${escapeHtml(item.body)}</span>${item.readAt ? '' : '<span class="mt-1 inline-block text-[9px] font-bold uppercase tracking-wide text-blue-300">New</span>'}</span>
+        </button>`).join('') : '<div class="px-4 py-10 text-center text-xs text-slate-500"><i class="fa-regular fa-bell-slash mb-2 block text-xl"></i>You are all caught up.</div>';
+    }
+
+    function closeNotificationCenter() {
+      notificationCenterOpen = false;
+      document.getElementById('notificationPopover')?.classList.add('hidden');
+      document.getElementById('notificationsButton')?.setAttribute('aria-expanded', 'false');
+      document.getElementById('mobileHeaderNotificationsButton')?.setAttribute('aria-expanded', 'false');
+    }
+
+    async function toggleNotificationCenter(event) {
+      event?.stopPropagation();
+      notificationCenterOpen = !notificationCenterOpen;
+      const popover = document.getElementById('notificationPopover');
+      if (!popover) return;
+      popover.classList.toggle('hidden', !notificationCenterOpen);
+      document.getElementById('notificationsButton')?.setAttribute('aria-expanded', String(notificationCenterOpen));
+      document.getElementById('mobileHeaderNotificationsButton')?.setAttribute('aria-expanded', String(notificationCenterOpen));
+      if (notificationCenterOpen) {
+        await loadNotifications(false);
+        renderNotificationCenter();
+      }
+    }
+
+    async function loadNotifications(announce = true) {
+      if (!currentUser || notificationRefreshInProgress) return;
+      notificationRefreshInProgress = true;
+      try {
+        const result = await apiRequest('/api/notifications');
+        const previous = knownNotificationIds;
+        notifications = result.notifications || [];
+        knownNotificationIds = new Set(notifications.map(item => item.id));
+        updateNotificationBadges(result.unreadCount);
+        renderNotificationCenter();
+        const fresh = notifications.filter(item => !previous.has(item.id));
+        if (announce && fresh.length) {
+          const newest = fresh[0];
+          if (fresh.some(item => ['MESSAGE', 'TICKET_READY'].includes(item.type))) playNotificationSound();
+          showToast(`${newest.title}: ${newest.body}`);
+          if (currentUser.role === 'AGENCY' && fresh.some(item => item.type === 'BOOKING_REQUEST')) {
+            BOOKINGS = (await apiRequest('/api/bookings')).bookings;
+            renderAgencyPortal();
+          }
+          if ('Notification' in window && Notification.permission === 'granted') new Notification(newest.title, { body: newest.body, tag: newest.id });
+        }
+      } catch (error) {
+        console.warn('Unable to load notifications.', error);
+      } finally {
+        notificationRefreshInProgress = false;
+      }
+    }
+
+    async function openNotification(notificationId) {
+      const item = notifications.find(notification => notification.id === notificationId);
+      if (!item) return;
+      await apiRequest(`/api/notifications/${encodeURIComponent(notificationId)}`, { method: 'PATCH', body: { action: 'READ' } });
+      item.readAt = new Date().toISOString();
+      updateNotificationBadges(notifications.filter(notification => !notification.readAt).length);
+      closeNotificationCenter();
+      if (item.conversationId) {
+        await openMessagingCenter();
+        await openConversation(item.conversationId);
+      } else if (item.bookingId && currentUser?.role === 'AGENCY') {
+        activeAgencyBookingId = item.bookingId;
+        switchPortal('AGENCY');
+        renderAgencyPortal();
+      }
+    }
+
+    async function markAllNotificationsRead() {
+      await apiRequest('/api/notifications/read-all', { method: 'POST', body: {} });
+      notifications = notifications.map(item => ({ ...item, readAt: item.readAt || new Date().toISOString() }));
+      updateNotificationBadges(0);
+      renderNotificationCenter();
+    }
+
+    function stopNotificationUpdates() {
+      notificationRealtimeRequestId += 1;
+      if (notificationPollTimer) window.clearInterval(notificationPollTimer);
+      notificationPollTimer = null;
+      notificationEventSource?.close();
+      notificationEventSource = null;
+      notifications = [];
+      knownNotificationIds = new Set();
+      updateNotificationBadges(0);
+      closeNotificationCenter();
+    }
+
+    function startNotificationUpdates() {
+      const requestId = ++notificationRealtimeRequestId;
+      if (notificationPollTimer) window.clearInterval(notificationPollTimer);
+      notificationPollTimer = window.setInterval(() => {
+        if (!document.hidden) loadNotifications(true);
+      }, 7000);
+      notificationEventSource?.close();
+      notificationEventSource = null;
+      void (async () => {
+        try {
+          const realtime = await apiRequest('/api/catalog/realtime');
+          if (!realtime.supported || requestId !== notificationRealtimeRequestId || !currentUser) return;
+          const source = new EventSource('/api/notifications/stream');
+          notificationEventSource = source;
+          source.addEventListener('notification', () => loadNotifications(true));
+          source.onerror = () => {
+            source.close();
+            if (notificationEventSource === source) notificationEventSource = null;
+          };
+        } catch (error) {
+          console.warn('Live notifications are unavailable; periodic refresh remains enabled.', error);
+        }
+      })();
+    }
+
+    async function enableWebPush() {
+      if (!('Notification' in window)) { showToast('This device does not support browser notifications.'); return; }
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { showToast('Notification permission was not granted.'); return; }
+      try {
+        const keyResult = await apiRequest('/api/push/public-key');
+        if (!keyResult.configured) { showToast('In-app notifications are active. Device push is not configured on this server yet.'); return; }
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(keyResult.publicKey) });
+        await apiRequest('/api/push/subscriptions', { method: 'POST', body: { subscription: subscription.toJSON() } });
+        showToast('Device notifications enabled.');
+      } catch (error) { showToast(`Device notifications could not be enabled: ${error.message}`); }
+    }
+
+    function urlBase64ToUint8Array(value) {
+      const padding = '='.repeat((4 - value.length % 4) % 4);
+      const raw = atob((value + padding).replaceAll('-', '+').replaceAll('_', '/'));
+      return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
+    }
+
+    document.addEventListener('click', event => {
+      if (notificationCenterOpen && !event.target.closest('#notificationPopover, #notificationsButton, #mobileHeaderNotificationsButton')) closeNotificationCenter();
+    });
+
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return;
       refreshCustomerOffers().catch(error => console.warn('Unable to refresh recently published travel offers.', error));
       if (!currentUser) return;
+      loadNotifications(false);
       if (document.getElementById('messagesPage').classList.contains('hidden')) {
         loadConversations().catch(error => console.warn('Unable to refresh unread messages.', error));
       } else if (activeConversationId) {
@@ -5053,16 +5542,70 @@
       persistAppState();
     }
 
+    function renderPopularRoutes() {
+      const grid = document.getElementById('popularRoutesGrid');
+      if (!grid) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const routeMap = new Map();
+      CATALOG.filter(item => item.category === 'FLIGHT'
+        && Number(item.available ?? 0) > 0
+        && Number(item.published ?? 1) === 1
+        && (!item.travelDate || item.travelDate >= today))
+        .forEach(item => {
+          const origin = String(item.routeBadge || '').match(/^[A-Z]{3}/i)?.[0]?.toUpperCase() || '';
+          if (!origin || !item.destination) return;
+          const key = `${origin}:${item.destination}`;
+          if (!routeMap.has(key)) routeMap.set(key, { origin, destination: item.destination });
+        });
+      const routes = [...routeMap.values()].slice(0, 3);
+      if (!routes.length) {
+        grid.innerHTML = `<div class="col-span-full rounded-2xl border border-white/10 bg-white/[.035] px-4 py-3 text-xs text-slate-400">No ready flights are published right now. Participating agencies can publish available flights from their inventory portal.</div>`;
+        return;
+      }
+      grid.innerHTML = routes.map(route => {
+        const originName = getDestinationDisplayName(route.origin).replace(/\s*\([A-Z]{3}\)$/, '');
+        const destinationName = getDestinationDisplayName(route.destination).replace(/\s*\([A-Z]{3}\)$/, '');
+        return `<button type="button" onclick="selectPopularRoute('${escapeHtml(route.origin)}','${escapeHtml(route.destination)}')" class="popular-route-card flex items-center justify-between rounded-2xl border border-fuchsia-500/80 bg-[#111827] px-4 py-3 text-left shadow-[0_0_18px_rgba(217,70,239,.08)] transition hover:border-fuchsia-300 hover:bg-fuchsia-500/[.08]" aria-label="Find ready flights from ${escapeHtml(originName)} to ${escapeHtml(destinationName)}"><span><span class="block text-xs font-bold text-white">${escapeHtml(originName)} <span class="text-fuchsia-400">→</span> ${escapeHtml(destinationName)}</span><span class="mt-1 block text-[10px] text-slate-400">${escapeHtml(route.origin)} · ${escapeHtml(route.destination)}</span></span><i class="fa-solid fa-arrow-right text-fuchsia-400" aria-hidden="true"></i></button>`;
+      }).join('');
+    }
+
+    function handleCategoryTabKeydown(event) {
+      const categories = ['ALL', 'FLIGHT', 'HOTEL', 'CAR', 'TOUR', 'TRANSFER', 'PACKAGE'];
+      const currentTab = event.target.closest('[role="tab"]');
+      if (!currentTab) return;
+      const currentIndex = categories.findIndex(category => `cat_${category}` === currentTab.id);
+      if (currentIndex < 0) return;
+
+      let nextIndex;
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % categories.length;
+      else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + categories.length) % categories.length;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = categories.length - 1;
+      else return;
+
+      event.preventDefault();
+      const nextTab = document.getElementById(`cat_${categories[nextIndex]}`);
+      nextTab.focus();
+      selectCategory(categories[nextIndex]);
+    }
+
     function selectCategory(cat) {
+      const categories = ['ALL', 'FLIGHT', 'HOTEL', 'CAR', 'TOUR', 'TRANSFER', 'PACKAGE'];
+      if (!categories.includes(cat)) return;
       currentCategory = cat;
-      ['ALL', 'FLIGHT', 'HOTEL', 'CAR', 'TOUR', 'TRANSFER', 'PACKAGE'].forEach(c => {
+      categories.forEach(c => {
         const btn = document.getElementById(`cat_${c}`);
+        if (!btn) return;
+        const isSelected = c === cat;
+        btn.setAttribute('aria-selected', String(isSelected));
+        btn.tabIndex = isSelected ? 0 : -1;
         if (c === cat) {
-          btn.className = 'cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-400 to-blue-500 text-black shadow-lg shadow-blue-500/20';
+          btn.className = 'cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-400 to-blue-500 text-black shadow-lg shadow-blue-500/20';
         } else {
-          btn.className = 'cat-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10';
+          btn.className = 'cat-btn shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10';
         }
       });
+      document.getElementById('catalogContainer')?.setAttribute('aria-labelledby', `cat_${cat}`);
       renderCatalog();
     }
 
@@ -5073,6 +5616,17 @@
       document.getElementById('globalSearchInput').value = '';
       selectCategory('FLIGHT');
       performGlobalSearch();
+      const hasLiveOffer = CATALOG.some(item => {
+        const hasFutureTravelDate = !item.travelDate || item.travelDate >= new Date().toISOString().slice(0, 10);
+        const routeOrigin = String(item.routeBadge || '').match(/^[A-Z]{3}/i)?.[0]?.toUpperCase() || '';
+        return item.category === 'FLIGHT'
+          && routeOrigin === origin
+          && item.destination === destination
+          && Number(item.available ?? 0) > 0
+          && Number(item.published ?? 1) === 1
+          && hasFutureTravelDate;
+      });
+      if (!hasLiveOffer) showToast(`No live published offers are available for ${origin} to ${destination} right now.`);
     }
 
     function getDestinationDisplayName(destinationCode) {
@@ -5121,6 +5675,7 @@
     }
 
     function renderCatalog() {
+      renderPopularRoutes();
       const searchAgSelect = document.getElementById('searchAgencyFilter');
       const previousAgencyFilter = searchAgSelect.value || 'ALL';
       searchAgSelect.innerHTML = `<option value="ALL">All travel companies</option>` + Object.values(AGENCIES).map(ag => `<option value="${escapeHtml(ag.id)}">${escapeHtml(ag.name)}</option>`).join('');
@@ -5431,6 +5986,22 @@
       showToast('Offer selected. Review your details and continue with the booking request.');
     }
 
+    function clearBookingRequestEntry() {
+      ['travFirstName', 'travLastName', 'travPhone', 'travEmail'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+      });
+      const seatInput = document.getElementById('bookingSeatCount');
+      seatInput.value = '1';
+      seatInput.disabled = true;
+      document.querySelector('input[name="bookingPaymentMethod"][value="REQUEST_ONLY"]')?.click();
+      const waafiRadio = document.getElementById('waafiPaymentRadio');
+      if (waafiRadio) waafiRadio.checked = false;
+      selectedOffer = null;
+      updateFinancialEngineView();
+      updateBookingPaymentNote();
+    }
+
     async function submitBookingRequest() {
       if (currentUser?.role === 'SUPER_ADMIN' || !selectedOffer) {
         showToast('Choose a travel offer to request a booking.');
@@ -5454,7 +6025,7 @@
       if (button) button.disabled = true;
       const bookedOfferId = selectedOffer.id;
       try {
-        const { booking, paymentUrl } = await apiRequest('/api/bookings', {
+        const { booking, conversationId, paymentUrl } = await apiRequest('/api/bookings', {
           method: 'POST',
           body: {
             offerId: bookedOfferId,
@@ -5477,8 +6048,15 @@
         if (currentUser?.role === 'AGENCY') renderAgencyPortal();
         if (currentUser?.role === 'SUPER_ADMIN') renderAdminPortal();
         updateBookingBadges();
+        clearBookingRequestEntry();
         if (paymentUrl) {
           window.location.assign(paymentUrl);
+          return;
+        }
+        if (currentUser?.role === 'CLIENT' && conversationId) {
+          activeConversationId = conversationId;
+          await openMessagingCenter();
+          showToast(`Request ${booking.ref} sent. Your agency chat is open.`);
           return;
         }
         showToast(paymentMethod === 'WAAFI'
@@ -5498,7 +6076,7 @@
       if (!selectedOffer) {
         document.getElementById('currentStagePill').innerText = 'SELECT OFFER';
         document.getElementById('selectedOfferBox').textContent = 'Choose an available offer to begin a booking.';
-        document.getElementById('financialBreakdownBox').replaceChildren();
+        document.getElementById('financialBreakdownBox').innerHTML = '<div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-slate-500"><span>Estimated total</span><span class="font-mono-code text-slate-300">$0 USD</span></div>';
         document.getElementById('workflowActionButtons').innerHTML = '<div class="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center text-xs text-slate-400">Choose an offer above to start a request.</div>';
         document.getElementById('bookingSeatCount').max = '1';
         document.getElementById('bookingSeatCount').value = '1';
@@ -5582,12 +6160,135 @@
       return booking;
     }
 
+    function setAgencyBookingSearch(value) {
+      agencyBookingSearchQuery = String(value || '');
+      agencyBookingPage = 1;
+      renderAgencyPortal();
+    }
+
+    function setAgencyBookingStatusFilter(value) {
+      agencyBookingStatusFilter = String(value || 'ALL');
+      agencyBookingPage = 1;
+      renderAgencyPortal();
+    }
+
+    function setAgencyBookingDateFilter(type, value) {
+      if (type === 'from') agencyBookingFromDate = String(value || '');
+      if (type === 'to') agencyBookingToDate = String(value || '');
+      agencyBookingPage = 1;
+      renderAgencyPortal();
+    }
+
+    function setAgencyBookingSort(value) {
+      agencyBookingSort = String(value || 'NEWEST');
+      agencyBookingPage = 1;
+      renderAgencyPortal();
+    }
+
+    function changeAgencyBookingPage(delta) {
+      agencyBookingPage = Math.max(1, agencyBookingPage + Number(delta || 0));
+      renderAgencyPortal();
+    }
+
+    function startNewAgencyBooking() {
+      switchPortal('CUSTOMER');
+      window.setTimeout(() => document.getElementById('view_CUSTOMER')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+      showToast('Choose a trip below to start a new booking request.');
+    }
+
+    function editAgencyBookingFromRow(bookingId) {
+      activeAgencyBookingId = bookingId;
+      editActiveAgencyBooking();
+    }
+
+    function cancelAgencyBookingFromRow(bookingId) {
+      activeAgencyBookingId = bookingId;
+      cancelActiveAgencyBooking();
+    }
+
+    function viewAgencyBookingFromRow(bookingId) {
+      activeAgencyBookingId = bookingId;
+      viewActiveAgencyBooking();
+    }
+
+    function formatBookingDateTime(value) {
+      if (!value) return 'Not available';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    async function rejectAgencyBooking(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking || booking.state !== 'REQUESTED') return;
+      const reason = window.prompt(`Why are you rejecting booking ${booking.ref}?`, 'Not available for the requested trip');
+      if (reason === null) return;
+      try {
+        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
+          method: 'PATCH', body: { action: 'REJECT', reason }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        showToast('Booking request rejected and inventory restored.');
+      } catch (error) { showToast(error.message); }
+    }
+
+    async function restoreRejectedAgencyBooking(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking || booking.state !== 'REJECTED' || !window.confirm(`Restore booking ${booking.ref} to Requested? Its seats will be reserved again.`)) return;
+      try {
+        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
+          method: 'PATCH', body: { action: 'RESTORE_REQUESTED' }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        showToast('Rejected booking restored to Requested.');
+      } catch (error) { showToast(error.message); }
+    }
+
+    async function contactTravelerFromBooking(bookingId, event) {
+      event?.stopPropagation();
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking) {
+        showToast('This booking is not available in the selected agency.');
+        return;
+      }
+      if (!booking.customerId) {
+        showToast('This traveler does not have a linked account for direct chat.');
+        return;
+      }
+      try {
+        await openMessagingCenter();
+        const existing = conversations.find(conversation => conversation.customerId === booking.customerId && conversation.agencyId === booking.agencyId);
+        if (existing) {
+          await openConversation(existing.id);
+          return;
+        }
+        const result = await apiRequest('/api/conversations', {
+          method: 'POST',
+          body: {
+            recipientId: booking.customerId,
+            subject: `Booking ${booking.ref}`,
+            message: `Hello ${booking.travelerName}, this is ${AGENCIES[booking.agencyId]?.name || 'the travel agency'} regarding your booking request ${booking.ref}.`
+          }
+        });
+        activeConversationId = result.conversation.id;
+        await loadConversations();
+        await openConversation(activeConversationId);
+        showToast('Traveler conversation opened.');
+      } catch (error) {
+        showToast(error.message || 'Unable to open the traveler conversation.');
+      }
+    }
+
     function bookingStatePresentation(state) {
       const labels = {
         REQUESTED: 'REQUESTED',
         PAYMENT_PENDING: 'PAYMENT PENDING',
         PAYMENT_RECEIVED: 'PAYMENT RECEIVED',
         ACCEPTED: 'ACCEPTED',
+        REJECTED: 'REJECTED',
         CANCELLED: 'CANCELLED'
       };
       const styles = {
@@ -5595,6 +6296,7 @@
         PAYMENT_PENDING: 'bg-amber-500/15 text-amber-200',
         PAYMENT_RECEIVED: 'bg-emerald-500/15 text-emerald-300',
         ACCEPTED: 'bg-emerald-500/15 text-emerald-300',
+        REJECTED: 'bg-rose-500/15 text-rose-300',
         CANCELLED: 'bg-slate-500/15 text-slate-300'
       };
       return `<span class="rounded px-2 py-1 font-bold text-[10px] ${styles[state] || 'bg-white/10 text-slate-300'}">${labels[state] || escapeHtml(state)}</span>`;
@@ -5614,6 +6316,7 @@
         return;
       }
       const canEdit = booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY';
+      const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state);
       const canUndoAcceptance = canUndoAgencyBookingAcceptance(booking);
       const paymentReceived = booking.paymentStatus === 'APPROVED';
       const canCancel = (booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId)))
@@ -5621,6 +6324,7 @@
       document.getElementById('agencyBookingActionsTitle').textContent = `Request ${booking.ref}`;
       document.getElementById('agencyBookingActionsDescription').textContent = `${booking.travelerName} · ${booking.offerTitle}`;
       document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
+      document.getElementById('agencyBookingApproveAction').classList.toggle('hidden', !canAccept);
       document.getElementById('agencyBookingUndoAcceptanceAction').classList.toggle('hidden', !canUndoAcceptance);
       const cancelButton = document.getElementById('agencyBookingCancelAction');
       cancelButton.classList.toggle('hidden', !canEdit && !canCancel);
@@ -5661,6 +6365,7 @@
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Trip</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.offerTitle)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(booking.category)}${booking.travelDate ? ` · ${escapeHtml(booking.travelDate)}` : ' · Flexible date'}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Seats requested</div><div class="mt-1 font-bold text-white">${Number(booking.seatCount) || 1}</div><div class="mt-1 text-[10px] text-slate-400">Booking code: ${escapeHtml(booking.pnr)}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}</div><div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Record timestamps</div><div class="mt-1 text-[10px] text-slate-300">Created: ${escapeHtml(formatBookingDateTime(booking.createdAtUtc))}</div><div class="mt-1 text-[10px] text-slate-300">Updated: ${escapeHtml(formatBookingDateTime(booking.updatedAtUtc || booking.createdAtUtc))}</div></div>
         </div>`;
       const modal = document.getElementById('agencyBookingDetailsModal');
       modal.classList.remove('hidden');
@@ -5687,6 +6392,18 @@
       modal.classList.remove('hidden');
       modal.classList.add('flex');
       document.getElementById('agencyBookingEditName').focus();
+    }
+
+    function approveActiveAgencyBooking() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || !['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state)) {
+        showToast('This booking is no longer waiting for approval. Refresh the bookings list.');
+        return;
+      }
+      const paymentLabel = booking.state === 'PAYMENT_RECEIVED' ? 'Payment has already been received. ' : '';
+      if (!confirm(`${paymentLabel}Approve booking request ${booking.ref} for ${booking.travelerName}? Choose Cancel to leave it unchanged.`)) return;
+      closeAgencyBookingActions();
+      acceptAgencyBooking(booking.id);
     }
 
     function closeAgencyBookingEdit() {
@@ -5726,10 +6443,10 @@
     async function acceptAgencyBooking(bookingId) {
       const booking = BOOKINGS.find(item => item.id === bookingId);
       if (!booking || !['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state)) return;
-      const button = document.getElementById(`agencyBookingAccept_${bookingId}`);
+      const button = document.getElementById(`agencyBookingToggle_${bookingId}`);
       if (button) button.disabled = true;
       try {
-        const { booking: updatedBooking } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
+        const { booking: updatedBooking, ticketError } = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}`, {
           method: 'PATCH',
           body: { action: 'ACCEPT' }
         });
@@ -5737,12 +6454,22 @@
         renderAgencyPortal();
         renderAdminPortal();
         updateBookingBadges();
-        showToast(booking.state === 'PAYMENT_RECEIVED' ? 'Payment received. Booking request accepted.' : 'Booking request accepted.');
+        showToast(ticketError
+          ? `Booking accepted, but the confirmation PDF needs retry: ${ticketError}`
+          : (booking.state === 'PAYMENT_RECEIVED' ? 'Payment received. Booking accepted and confirmation PDF generated.' : 'Booking accepted and confirmation PDF generated.'));
       } catch (error) {
         showToast(error.message);
       } finally {
         if (button?.isConnected) button.disabled = false;
       }
+    }
+
+    async function retryAgencyBookingTicket(bookingId) {
+      try {
+        await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket/generate`, { method: 'POST', body: {} });
+        showToast('Booking confirmation PDF is ready for the traveler.');
+        renderAgencyPortal();
+      } catch (error) { showToast(error.message); }
     }
 
     function undoActiveAgencyBookingAcceptance() {
@@ -5758,7 +6485,7 @@
         showToast('Only an unpaid accepted booking can return to the pending list. Paid bookings need to be canceled.');
         return;
       }
-      const button = document.getElementById(`agencyBookingUndo_${bookingId}`)
+      const button = document.getElementById(`agencyBookingToggle_${bookingId}`)
         || document.getElementById('agencyBookingUndoAcceptanceAction');
       if (button) button.disabled = true;
       try {
@@ -5776,6 +6503,23 @@
       } finally {
         if (button?.isConnected) button.disabled = false;
       }
+    }
+
+    function toggleAgencyBookingAcceptance(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (!booking) return;
+      if (['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state)) {
+        const paymentLabel = booking.state === 'PAYMENT_RECEIVED' ? 'Payment has already been received. ' : '';
+        if (!confirm(`${paymentLabel}Approve booking request ${booking.ref} for ${booking.travelerName}? Choose Cancel to leave it unchanged.`)) return;
+        acceptAgencyBooking(bookingId);
+        return;
+      }
+      if (canUndoAgencyBookingAcceptance(booking)) {
+        if (!confirm(`Undo acceptance for booking ${booking.ref}? It will return to the pending list.`)) return;
+        undoAgencyBookingAcceptance(bookingId);
+        return;
+      }
+      showToast('This booking cannot switch acceptance now. Refresh the bookings list.');
     }
 
     function cancelActiveAgencyBooking() {
@@ -5858,23 +6602,60 @@
       document.getElementById('staffCountLabel').innerText = agency.staff.length;
       document.getElementById('clientCountLabel').innerText = agency.clients.length;
 
-      const tenantBookings = BOOKINGS.filter(b => b.agencyId === tenantId && b.state !== 'CANCELLED');
-      const openRequests = tenantBookings.filter(booking => booking.state === 'REQUESTED');
+      const allTenantBookings = BOOKINGS.filter(b => b.agencyId === tenantId && b.state !== 'CANCELLED');
+      const query = String(agencyBookingSearchQuery || '').trim().toLowerCase();
+      const openRequests = allTenantBookings.filter(booking => ['REQUESTED', 'PAYMENT_PENDING', 'PAYMENT_RECEIVED'].includes(booking.state));
+      const approvedBookings = allTenantBookings.filter(booking => booking.state === 'ACCEPTED');
+      const rejectedBookings = allTenantBookings.filter(booking => booking.state === 'REJECTED');
+      const filteredBookings = allTenantBookings.filter(booking => {
+        const matchesQuery = !query || [booking.ref, booking.travelerName, booking.travelerEmail, booking.phone, booking.offerTitle, booking.pnr]
+          .some(value => String(value || '').toLowerCase().includes(query));
+        const matchesStatus = agencyBookingStatusFilter === 'ALL' || booking.state === agencyBookingStatusFilter;
+        const createdDate = String(booking.createdAtUtc || '').slice(0, 10);
+        const matchesFrom = !agencyBookingFromDate || createdDate >= agencyBookingFromDate;
+        const matchesTo = !agencyBookingToDate || createdDate <= agencyBookingToDate;
+        return matchesQuery && matchesStatus && matchesFrom && matchesTo;
+      });
+      const tenantBookings = [...filteredBookings].sort((left, right) => {
+        if (agencyBookingSort === 'OLDEST') return String(left.createdAtUtc || '').localeCompare(String(right.createdAtUtc || ''));
+        if (agencyBookingSort === 'TRAVEL_DATE') return String(left.travelDate || '9999-12-31').localeCompare(String(right.travelDate || '9999-12-31'));
+        if (agencyBookingSort === 'TRAVELER') return String(left.travelerName || '').localeCompare(String(right.travelerName || ''));
+        if (agencyBookingSort === 'TOTAL_DESC') return Number(right.financials?.customerGrandTotalCents || 0) - Number(left.financials?.customerGrandTotalCents || 0);
+        return String(right.createdAtUtc || '').localeCompare(String(left.createdAtUtc || ''));
+      });
+      const totalPages = Math.max(1, Math.ceil(tenantBookings.length / agencyBookingPageSize));
+      agencyBookingPage = Math.min(agencyBookingPage, totalPages);
+      const visibleTenantBookings = tenantBookings.slice((agencyBookingPage - 1) * agencyBookingPageSize, agencyBookingPage * agencyBookingPageSize);
       const requestValue = openRequests.reduce((sum, booking) => sum + booking.financials.customerGrandTotalCents, 0);
       const potentialCommission = openRequests.reduce((sum, booking) => sum + booking.financials.agencyCommissionCents, 0);
+      const bookingsCount = document.getElementById('agencyBookingsCount');
+      if (bookingsCount) bookingsCount.textContent = `${tenantBookings.length}${query || agencyBookingStatusFilter !== 'ALL' || agencyBookingFromDate || agencyBookingToDate ? `/${allTenantBookings.length}` : ''} booking item${tenantBookings.length === 1 ? '' : 's'}`;
+      const pageLabel = document.getElementById('agencyBookingsPageLabel');
+      if (pageLabel) pageLabel.textContent = tenantBookings.length ? `Page ${agencyBookingPage} of ${totalPages}` : 'No matching bookings';
+      const pageButtons = document.querySelectorAll('#view_AGENCY .agency-bookings-scroller ~ div button');
+      if (pageButtons.length >= 2) {
+        pageButtons[0].disabled = agencyBookingPage <= 1;
+        pageButtons[1].disabled = agencyBookingPage >= totalPages;
+      }
 
       document.getElementById('agencyKpiGrid').innerHTML = `
-        <div class="p-4 rounded-2xl bg-black/50 border border-white/10"><div class="text-xs text-slate-400">Open booking requests</div><div class="text-xl font-bold mt-1">${openRequests.length}</div></div>
-        <div class="p-4 rounded-2xl bg-black/50 border border-white/10"><div class="text-xs text-slate-400">Estimated request value</div><div class="text-xl font-mono-code font-bold mt-1">${formatMoney(requestValue)}</div></div>
-        <div class="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/30"><div class="text-xs text-blue-300">Potential commission</div><div class="text-xl font-mono-code font-bold text-blue-400 mt-1">${formatMoney(potentialCommission)}</div></div>
-        <div class="p-4 rounded-2xl bg-black/50 border border-white/10"><div class="text-xs text-slate-400">Staff and clients</div><div class="text-xs font-mono-code font-bold text-blue-400 mt-2">${agency.staff.length} staff · ${agency.clients.length} clients</div></div>
+        <div class="p-4 rounded-2xl bg-black/50 border border-white/10"><div class="text-xs text-slate-400">Total bookings</div><div class="text-xl font-bold mt-1">${allTenantBookings.length}</div></div>
+        <div class="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/30"><div class="text-xs text-blue-300">Pending requests</div><div class="text-xl font-bold mt-1 text-blue-300">${openRequests.length}</div><div class="mt-1 text-[10px] text-slate-500">${formatMoney(requestValue)} estimated</div></div>
+        <div class="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30"><div class="text-xs text-emerald-300">Approved bookings</div><div class="text-xl font-bold mt-1 text-emerald-300">${approvedBookings.length}</div><div class="mt-1 text-[10px] text-slate-500">${formatMoney(approvedBookings.reduce((sum, booking) => sum + Number(booking.financials?.customerGrandTotalCents || 0), 0))}</div></div>
+        <div class="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30"><div class="text-xs text-rose-300">Rejected bookings</div><div class="text-xl font-bold mt-1 text-rose-300">${rejectedBookings.length}</div><div class="mt-1 text-[10px] text-slate-500">${agency.staff.length} staff · ${agency.clients.length} clients</div></div>
       `;
 
       document.getElementById('agencyBookingsTableBody').innerHTML = tenantBookings.length === 0
         ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No active booking requests for this company.</td></tr>`
-        : tenantBookings.map(b => {
+        : visibleTenantBookings.map(b => {
           const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(b.state);
           const canUndoAcceptance = canUndoAgencyBookingAcceptance(b);
+          const canToggleAcceptance = canAccept || canUndoAcceptance;
+          const canEdit = b.state === 'REQUESTED' && b.paymentProvider === 'REQUEST_ONLY';
+          const paymentReceived = b.paymentStatus === 'APPROVED';
+          const canCancel = (b.state === 'ACCEPTED' && (paymentReceived || Boolean(b.offerId))) || (canEdit && Boolean(b.offerId));
+          const canContact = Boolean(b.customerId);
+          const menuId = escapeHtml(b.id);
           return `
             <tr class="agency-booking-row hover:bg-white/5">
               <td data-label="Booking reference" class="p-3 font-mono-code font-bold text-blue-400">${escapeHtml(b.ref)}</td>
@@ -5883,11 +6664,16 @@
               <td data-label="Booking code" class="p-3 font-mono-code text-amber-300">${escapeHtml(b.pnr)}</td>
               <td data-label="Estimated total" class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
               <td data-label="Potential commission" class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
-              <td data-label="Status and actions" class="min-w-[220px] p-3"><div class="agency-booking-row-actions flex flex-wrap items-center gap-2">
+              <td data-label="Status and actions" class="min-w-[150px] p-3 text-right"><div class="agency-booking-row-actions">
                 ${bookingStatePresentation(b.state)}
-                ${canAccept ? `<button id="agencyBookingAccept_${escapeHtml(b.id)}" type="button" onclick="acceptAgencyBooking('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg bg-emerald-400 px-3 py-2 text-[10px] font-extrabold text-[#06241c] hover:bg-emerald-300">Accept request</button>` : ''}
-                ${canUndoAcceptance ? `<button id="agencyBookingUndo_${escapeHtml(b.id)}" type="button" onclick="undoAgencyBookingAcceptance('${escapeHtml(b.id)}')" class="whitespace-nowrap rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[10px] font-extrabold text-amber-200 hover:bg-amber-500/20" title="Return to pending requests without canceling this booking">Undo acceptance</button>` : ''}
-                <button type="button" onclick="openAgencyBookingActions('${escapeHtml(b.id)}')" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" aria-label="More actions for booking ${escapeHtml(b.ref)}" title="More actions"><i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button>
+                ${canToggleAcceptance ? `<button id="agencyBookingToggle_${menuId}" type="button" onclick="toggleAgencyBookingAcceptance('${menuId}')" class="booking-approve-button ${canUndoAcceptance ? 'booking-undo-button' : ''}" aria-label="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'} for booking ${escapeHtml(b.ref)}" title="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}"><i class="fa-solid ${canUndoAcceptance ? 'fa-rotate-left' : 'fa-check'}" aria-hidden="true"></i><span>${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}</span></button>` : ''}
+                <button type="button" onclick="viewAgencyBookingFromRow('${menuId}')" class="agency-booking-icon-button" aria-label="View booking details for ${escapeHtml(b.ref)}" title="View booking details"><i class="fa-regular fa-eye" aria-hidden="true"></i></button>
+                <button type="button" onclick="contactTravelerFromBooking('${menuId}',event)" class="agency-booking-icon-button ${canContact ? '' : 'opacity-50'}" ${canContact ? '' : 'disabled title="Traveler account not linked"'} aria-label="Contact traveler for ${escapeHtml(b.ref)}" title="Contact traveler"><i class="fa-regular fa-comments" aria-hidden="true"></i></button>
+                ${b.state === 'REQUESTED' ? `<button type="button" onclick="rejectAgencyBooking('${menuId}')" class="agency-booking-icon-button danger" aria-label="Reject request ${escapeHtml(b.ref)}" title="Reject request"><i class="fa-solid fa-ban" aria-hidden="true"></i></button>` : ''}
+                ${b.state === 'REJECTED' ? `<button type="button" onclick="restoreRejectedAgencyBooking('${menuId}')" class="agency-booking-icon-button" aria-label="Restore request ${escapeHtml(b.ref)}" title="Restore request"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button>` : ''}
+                ${b.state === 'ACCEPTED' ? `<button type="button" onclick="retryAgencyBookingTicket('${menuId}')" class="agency-booking-icon-button" aria-label="Generate booking confirmation for ${escapeHtml(b.ref)}" title="Generate or retry confirmation PDF"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i></button>` : ''}
+                ${canEdit ? `<button type="button" onclick="editAgencyBookingFromRow('${menuId}')" class="agency-booking-icon-button" aria-label="Edit traveler details for booking ${escapeHtml(b.ref)}" title="Edit traveler details"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button>` : ''}
+                ${canCancel ? `<button type="button" onclick="cancelAgencyBookingFromRow('${menuId}')" class="agency-booking-icon-button danger" aria-label="${b.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request'} for booking ${escapeHtml(b.ref)}" title="${b.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request'}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>` : ''}
               </div></td>
             </tr>`;
         }).join('');
@@ -6400,7 +7186,7 @@
       `).join('');
     }
 
-    function openMyTripsModal() {
+    function renderLegacyTrips() {
       const modal = document.getElementById('tripsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
       document.getElementById('myTripsContainer').innerHTML = getVisibleBookings().map(b => `
@@ -6413,6 +7199,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-fuchsia-400/10 bg-gradient-to-r from-blue-500/[0.08] to-fuchsia-500/[0.08] p-2.5"><span class="font-bold text-blue-200">${b.paymentStatus === 'APPROVED' ? 'Paid with WaafiPay' : b.paymentProvider === 'WAAFI' ? 'WaafiPay ticket payment' : 'Estimated total - not paid'}</span><span class="font-bold text-fuchsia-200">${formatMoney(b.financials.customerGrandTotalCents)}</span></div>
           ${b.paymentReference ? `<div class="break-all text-[10px] text-slate-500">Payment ref: ${escapeHtml(b.paymentReference)}${b.paymentTransactionId ? ` | Transaction: ${escapeHtml(b.paymentTransactionId)}` : ''}</div>` : ''}
           ${b.paymentStatus === 'PENDING' && b.paymentReference ? `<button type="button" onclick="refreshTicketPayment('${escapeHtml(b.paymentReference)}')" class="rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] font-bold text-blue-200">Check payment status</button>` : ''}
+          ${b.state === 'ACCEPTED' ? `<button type="button" onclick="openBookingTicket('${escapeHtml(b.id)}')" class="rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[10px] font-bold text-emerald-200"><i class="fa-solid fa-file-pdf mr-1"></i> View booking confirmation PDF</button>` : ''}
         </div>
       `).join('');
       if (!getVisibleBookings().length) {
@@ -6420,9 +7207,321 @@
       }
     }
 
+    function openMyTripsModal() {
+      if (!currentUser) { openAuthGate(); return; }
+      const modal = document.getElementById('tripsModal');
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+      renderMyTrips();
+    }
+
+    function renderMyTrips() {
+      const container = document.getElementById('myTripsContainer');
+      if (!container) return;
+      const query = (document.getElementById('myTripsSearch')?.value || '').trim().toLowerCase();
+      const filter = document.getElementById('myTripsFilter')?.value || 'ALL';
+      const today = new Date().toISOString().slice(0, 10);
+      const bookings = getVisibleBookings().map(booking => {
+        const agency = AGENCIES[booking.agencyId] || {};
+        const offer = CATALOG.find(item => item.id === booking.offerId) || {};
+        return {
+          ...booking,
+          agencyName: booking.agencyName || agency.name,
+          agencyLogoData: booking.agencyLogoData || agency.logoData,
+          agencyLogoMime: booking.agencyLogoMime || agency.logoMime,
+          agencyEmail: booking.agencyEmail || agency.email,
+          agencyPhone: booking.agencyPhone || agency.phone,
+          routeBadge: booking.routeBadge || offer.routeBadge,
+          destination: booking.destination || offer.destination,
+          supplierName: booking.supplierName || offer.supplierName
+        };
+      }).filter(booking => {
+        const searchable = [booking.ref, booking.pnr, booking.offerTitle, booking.agencyName, booking.routeBadge, booking.destination, booking.travelerName].filter(Boolean).join(' ').toLowerCase();
+        if (query && !searchable.includes(query)) return false;
+        if (filter === 'PENDING' && booking.state === 'ACCEPTED') return false;
+        if (filter === 'ACCEPTED' && booking.state !== 'ACCEPTED') return false;
+        if (filter === 'VOUCHER' && booking.ticketStatus !== 'READY') return false;
+        if (filter === 'UPCOMING' && (!booking.travelDate || booking.travelDate < today)) return false;
+        if (filter === 'PAST' && (!booking.travelDate || booking.travelDate >= today)) return false;
+        return true;
+      });
+      container.innerHTML = bookings.length ? bookings.map(b => {
+        const approved = b.state === 'ACCEPTED';
+        const statusClass = b.state === 'CANCELLED'
+          ? 'bg-rose-500/15 text-rose-300 border-rose-400/25'
+          : b.ticketStatus === 'READY'
+            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'
+            : b.ticketStatus === 'FAILED'
+              ? 'bg-rose-500/15 text-rose-300 border-rose-400/25'
+              : approved ? 'bg-blue-500/10 text-blue-200 border-blue-400/25' : 'bg-white/5 text-slate-300 border-white/15';
+        const ticketState = !approved ? 'Awaiting agency approval'
+          : b.ticketStatus === 'READY' ? (b.ticketRetryAvailable ? 'Ready — new version retry available' : 'Ready')
+            : b.ticketStatus === 'FAILED' ? 'Generation failed — retry available'
+              : b.ticketStatus === 'PROCESSING' ? 'Generating'
+                : 'Not generated yet';
+        const ticketActions = !approved
+          ? '<span class="text-slate-400">Your booking confirmation will be available after agency approval.</span>'
+          : b.ticketStatus === 'READY'
+            ? `<button type="button" onclick="openBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl bg-emerald-500 px-3 py-2 font-extrabold text-black hover:bg-emerald-400"><i class="fa-solid fa-eye mr-1"></i>Preview Voucher</button><button type="button" onclick="openBookingPdf('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200">Open PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','pdf')" class="rounded-xl border border-blue-400/25 bg-blue-500/10 px-3 py-2 font-bold text-blue-200"><i class="fa-solid fa-file-pdf mr-1"></i>Download PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','jpg')" class="rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2 font-bold text-fuchsia-200"><i class="fa-solid fa-image mr-1"></i>Download JPG</button><button type="button" onclick="printBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200"><i class="fa-solid fa-print mr-1"></i>Print Voucher</button>${b.ticketRetryAvailable ? `<button type="button" onclick="retryMyTicketGeneration('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Retry new version</button>` : ''}${b.ticketEmailStatus === 'FAILED' ? `<button type="button" onclick="retryBookingTicketEmail('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Retry Email</button>` : ''}`
+            : `<button type="button" onclick="retryMyTicketGeneration('${escapeHtml(b.id)}')" class="rounded-xl bg-blue-500 px-3 py-2 font-extrabold text-white hover:bg-blue-400"><i class="fa-solid fa-rotate mr-1"></i>Retry Voucher Generation</button>`;
+        return `<article class="voucher-print-card overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#111c32] to-black/60 text-xs shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <div class="flex min-w-0 items-center gap-3">${avatarMarkup(b.agencyName || 'Agency', b.agencyLogoData, b.agencyLogoMime, 'h-12 w-12')}<div><div class="font-mono-code text-[10px] font-bold text-blue-300">BOOKING ${escapeHtml(b.ref)}</div><h4 class="mt-1 text-sm font-extrabold text-white">${escapeHtml(b.offerTitle || b.agencyName || 'Travel booking')}</h4><div class="text-[10px] text-slate-400">${escapeHtml(b.agencyName || 'Assigned agency')}${b.agencyPhone ? ` · ${escapeHtml(b.agencyPhone)}` : ''}</div></div></div>
+            <span class="rounded-full border px-2.5 py-1 text-[9px] font-bold ${statusClass}">${escapeHtml(b.state || 'REQUESTED')}</span>
+          </div>
+          <div class="grid gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Passenger</div><div class="mt-1 text-slate-200">${escapeHtml(b.travelerName || 'Not provided')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Booking reference</div><div class="mt-1 font-mono-code font-bold text-white">${escapeHtml(b.ref || 'Not assigned')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Request number</div><div class="mt-1 font-mono-code text-slate-300">${escapeHtml(b.pnr || 'Not assigned')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Origin & destination</div><div class="mt-1 font-bold text-white">${escapeHtml(b.routeBadge || b.destination || 'To be confirmed')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Confirmed travel date</div><div class="mt-1 font-bold text-white">${escapeHtml(b.travelDate || 'To be confirmed')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Travel provider</div><div class="mt-1 text-slate-200">${escapeHtml(b.supplierName || 'Not listed — not airline-verified')}</div></div>
+            <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Document type & status</div><div class="mt-1 text-slate-200">${approved ? 'SAFAR KAABE booking confirmation' : 'Not issued'} · ${escapeHtml(ticketState)}</div></div>
+            ${b.ticketDocumentReference ? `<div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Document reference</div><div class="mt-1 font-mono-code text-slate-200">${escapeHtml(b.ticketDocumentReference)}${b.ticketDocumentVersion ? ` · v${escapeHtml(b.ticketDocumentVersion)}` : ''}</div></div>` : ''}
+            ${b.ticketIssuedAt ? `<div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Issued</div><div class="mt-1 text-slate-200">${escapeHtml(new Date(b.ticketIssuedAt).toLocaleString())}</div></div>` : ''}
+            ${b.ticketEmailStatus ? `<div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Email delivery</div><div class="mt-1 text-slate-200">${escapeHtml(b.ticketEmailStatus)}${b.ticketEmailSentAt ? ` · ${escapeHtml(new Date(b.ticketEmailSentAt).toLocaleString())}` : ''}</div></div>` : ''}
+          </div>
+          ${b.ticketStatus === 'FAILED' ? '<p class="px-4 pb-3 text-xs text-rose-200">Ticket generation failed. Your approved booking remains active; retry generation without rebooking.</p>' : ''}
+          <div class="flex flex-wrap items-center gap-2 border-t border-white/10 px-4 py-3">${ticketActions}</div>
+        </article>`;
+      }).join('') : '<div class="rounded-2xl border border-dashed border-white/15 px-4 py-12 text-center text-sm text-slate-400">No trips match your filters.</div>';
+    }
+
     function closeMyTripsModal() {
       document.getElementById('tripsModal').classList.add('hidden');
       document.getElementById('tripsModal').classList.remove('flex');
+    }
+
+    async function openBookingTicket(bookingId) {
+      let ticketAvailable = false;
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket`);
+        if (!result.ticket) {
+          showToast(result.status === 'FAILED' ? 'Voucher generation failed. Use Retry Voucher Generation to try again.' : 'The booking confirmation PDF is not ready yet.');
+          return;
+        }
+        ticketAvailable = true;
+        const pdfBlob = await fetchTicketDocumentBlob(bookingId, 'pdf');
+        const pdfObjectUrl = URL.createObjectURL(pdfBlob);
+        const frame = document.getElementById('ticketPdfFrame');
+        frame.src = 'about:blank';
+        if (ticketDocumentObjectUrl) URL.revokeObjectURL(ticketDocumentObjectUrl);
+        if (ticketJpgObjectUrl) URL.revokeObjectURL(ticketJpgObjectUrl);
+        ticketDocumentObjectUrl = pdfObjectUrl;
+        ticketJpgObjectUrl = '';
+        ticketPreviewBookingId = bookingId;
+        document.getElementById('ticketJpgFallback').classList.add('hidden');
+        document.getElementById('ticketJpgFallback').removeAttribute('src');
+        frame.classList.remove('hidden');
+        document.getElementById('ticketPreviewTitle').textContent = `Booking confirmation · ${result.ticket.documentReference || result.ticket.fileName.replace('SAFAR-KAABE-Booking-Voucher-', '').replace('.pdf', '')}`;
+        ticketPdfPreviewUrl = pdfObjectUrl;
+        ticketZoomPercentage = 100;
+        const previewUrl = `${ticketPdfPreviewUrl}#zoom=page-width`;
+        frame.src = previewUrl;
+        document.getElementById('ticketPdfStatus').textContent = 'Loading saved ticket PDF…';
+        document.getElementById('ticketPdfRetryButton').classList.add('hidden');
+        window.setTimeout(() => {
+          const status = document.getElementById('ticketPdfStatus');
+          if (ticketDocumentObjectUrl === pdfObjectUrl && status.textContent === 'Loading saved ticket PDF…') {
+            showTicketJpgFallback('The PDF viewer is taking too long. Showing the saved ticket image instead.');
+          }
+        }, 8_000);
+        const download = document.getElementById('ticketDownloadButton');
+        download.href = '#';
+        download.onclick = event => {
+          event.preventDefault();
+          downloadBookingDocument(bookingId, 'pdf');
+        };
+        const openPdf = document.getElementById('ticketOpenPdfButton');
+        openPdf.href = pdfObjectUrl;
+        openPdf.onclick = null;
+        const downloadJpg = document.getElementById('ticketJpgDownloadButton');
+        downloadJpg.href = '#';
+        downloadJpg.onclick = event => {
+          event.preventDefault();
+          downloadBookingDocument(bookingId, 'jpg');
+        };
+        document.getElementById('ticketPreviewModal').classList.remove('hidden');
+        document.getElementById('ticketPreviewModal').classList.add('flex');
+      } catch (error) {
+        document.getElementById('ticketPdfStatus').textContent = error.message;
+        if (ticketAvailable) {
+          ticketPreviewBookingId = bookingId;
+          document.getElementById('ticketPreviewModal').classList.remove('hidden');
+          document.getElementById('ticketPreviewModal').classList.add('flex');
+          await showTicketJpgFallback(`The PDF could not be previewed: ${error.message}`);
+        } else {
+          showToast(error.message);
+        }
+      }
+    }
+
+    async function openBookingPdf(bookingId) {
+      const pdfWindow = window.open('about:blank', '_blank');
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket`);
+        if (!result.ticket) {
+          if (pdfWindow) pdfWindow.close();
+          showToast('The saved PDF is not available yet.');
+          return;
+        }
+        const pdfBlob = await fetchTicketDocumentBlob(bookingId, 'pdf');
+        const pdfObjectUrl = URL.createObjectURL(pdfBlob);
+        if (pdfWindow) {
+          pdfWindow.location.replace(pdfObjectUrl);
+          window.setTimeout(() => URL.revokeObjectURL(pdfObjectUrl), 60_000);
+        } else {
+          URL.revokeObjectURL(pdfObjectUrl);
+          await openBookingTicket(bookingId);
+          showToast('Your browser blocked the new tab. The PDF is open in the preview instead.');
+        }
+      } catch (error) {
+        if (pdfWindow) pdfWindow.close();
+        showToast(error.message);
+      }
+    }
+
+    async function retryMyTicketGeneration(bookingId) {
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket/generate`, { method: 'POST', body: {} });
+        BOOKINGS = (await apiRequest('/api/bookings')).bookings;
+        renderMyTrips();
+        if (result.ticket?.status === 'READY') {
+          await openBookingTicket(bookingId);
+        }
+        showToast('Voucher generated and saved. Email delivery status is shown in My Trips & Vouchers.');
+      } catch (error) {
+        BOOKINGS = (await apiRequest('/api/bookings')).bookings;
+        renderMyTrips();
+        showToast(error.message);
+      }
+    }
+
+    async function retryBookingTicketEmail(bookingId) {
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket/email`, { method: 'POST', body: {} });
+        BOOKINGS = (await apiRequest('/api/bookings')).bookings;
+        renderMyTrips();
+        showToast(result.email?.status === 'SENT' ? 'Ticket email sent.' : `Ticket email status: ${result.email?.status || 'unknown'}.`);
+      } catch (error) { showToast(error.message); }
+    }
+
+    async function printBookingTicket(bookingId) {
+      await openBookingTicket(bookingId);
+      window.setTimeout(printTicketPreview, 800);
+    }
+
+    function zoomTicketPreview(change) {
+      const frame = document.getElementById('ticketPdfFrame');
+      if (!ticketPdfPreviewUrl || !frame.src || frame.src === 'about:blank') return;
+      ticketZoomPercentage = Math.max(50, Math.min(200, ticketZoomPercentage + change));
+      frame.src = `${ticketPdfPreviewUrl}#zoom=${ticketZoomPercentage}`;
+    }
+
+    function ticketPdfFrameLoaded() {
+      if (!ticketDocumentObjectUrl) return;
+      document.getElementById('ticketPdfStatus').textContent = 'Saved PDF loaded. Use the viewer controls to navigate pages and zoom.';
+      document.getElementById('ticketPdfRetryButton').classList.add('hidden');
+    }
+
+    async function ticketPdfFrameError() {
+      await showTicketJpgFallback('This device could not display the PDF inline. Showing the saved ticket image instead.');
+    }
+
+    async function fetchTicketDocumentBlob(bookingId, type) {
+      const extension = type === 'jpg' ? 'jpg' : 'pdf';
+      const response = await fetch(`/api/bookings/${encodeURIComponent(bookingId)}/ticket.${extension}`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: extension === 'jpg' ? 'image/jpeg' : 'application/pdf' }
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        let message = `Could not load the ticket ${extension.toUpperCase()} (HTTP ${response.status}).`;
+        try { message = JSON.parse(body).error || message; } catch {}
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const expectedType = extension === 'jpg' ? 'image/jpeg' : 'application/pdf';
+      if (!blob.type.toLowerCase().startsWith(expectedType)) {
+        throw new Error(`The ticket endpoint returned ${blob.type || 'an unknown file type'} instead of ${expectedType}.`);
+      }
+      const signature = new Uint8Array(await blob.slice(0, extension === 'jpg' ? 3 : 5).arrayBuffer());
+      const validSignature = extension === 'jpg'
+        ? signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff
+        : String.fromCharCode(...signature) === '%PDF-';
+      if (!validSignature) throw new Error(`The saved ticket ${extension.toUpperCase()} is invalid or incomplete.`);
+      return blob;
+    }
+
+    async function showTicketJpgFallback(message) {
+      const status = document.getElementById('ticketPdfStatus');
+      const image = document.getElementById('ticketJpgFallback');
+      const frame = document.getElementById('ticketPdfFrame');
+      if (!ticketPreviewBookingId) {
+        status.textContent = 'The saved PDF could not be opened. Retry the preview.';
+        document.getElementById('ticketPdfRetryButton').classList.remove('hidden');
+        return;
+      }
+      status.textContent = 'Loading the saved ticket image…';
+      try {
+        const jpgBlob = await fetchTicketDocumentBlob(ticketPreviewBookingId, 'jpg');
+        if (ticketJpgObjectUrl) URL.revokeObjectURL(ticketJpgObjectUrl);
+        ticketJpgObjectUrl = URL.createObjectURL(jpgBlob);
+        image.src = ticketJpgObjectUrl;
+        image.classList.remove('hidden');
+        frame.classList.add('hidden');
+        status.textContent = message;
+        document.getElementById('ticketPdfRetryButton').classList.remove('hidden');
+      } catch (error) {
+        status.textContent = `${message} ${error.message}`;
+        document.getElementById('ticketPdfRetryButton').classList.remove('hidden');
+      }
+    }
+
+    async function reloadTicketPdf() {
+      if (!ticketPreviewBookingId) return;
+      const bookingId = ticketPreviewBookingId;
+      document.getElementById('ticketPdfStatus').textContent = 'Retrying the saved PDF…';
+      document.getElementById('ticketPdfRetryButton').classList.add('hidden');
+      await openBookingTicket(bookingId);
+    }
+
+    async function downloadBookingDocument(bookingId, type) {
+      try {
+        const result = await apiRequest(`/api/bookings/${encodeURIComponent(bookingId)}/ticket`);
+        if (!result.ticket) { showToast('The booking document is not ready yet.'); return; }
+        const fileKey = type === 'jpg' ? 'jpgFileName' : 'fileName';
+        const blob = await fetchTicketDocumentBlob(bookingId, type);
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = result.ticket[fileKey];
+        document.body.appendChild(link); link.click(); link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      } catch (error) { showToast(error.message); }
+    }
+
+    function closeTicketPreview() {
+      const modal = document.getElementById('ticketPreviewModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      const frame = document.getElementById('ticketPdfFrame');
+      frame.src = 'about:blank';
+      frame.classList.remove('hidden');
+      const image = document.getElementById('ticketJpgFallback');
+      image.removeAttribute('src');
+      image.classList.add('hidden');
+      if (ticketDocumentObjectUrl) URL.revokeObjectURL(ticketDocumentObjectUrl);
+      if (ticketJpgObjectUrl) URL.revokeObjectURL(ticketJpgObjectUrl);
+      ticketDocumentObjectUrl = '';
+      ticketJpgObjectUrl = '';
+      ticketPdfPreviewUrl = '';
+      ticketPreviewBookingId = '';
+    }
+
+    function printTicketPreview() {
+      const frame = document.getElementById('ticketPdfFrame');
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { window.open(frame.src, '_blank', 'noopener'); }
     }
 
     async function refreshTicketPayment(referenceId) {
@@ -6537,15 +7636,30 @@
           hadServiceWorkerController = true;
         });
         navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(registration => {
-          const checkForAppUpdate = () => {
+          const checkForAppUpdate = async () => {
             if (document.visibilityState !== 'visible') return;
-            registration.update().catch(error => {
-              console.error('Unable to check for app updates.', error);
-            });
+            try {
+              const [, response] = await Promise.all([
+                registration.update(),
+                fetch('/api/app-version', { cache: 'no-store', credentials: 'same-origin' })
+              ]);
+              if (!response.ok) throw new Error(`Release check failed with HTTP ${response.status}.`);
+              const { releaseId } = await response.json();
+              if (typeof releaseId !== 'string' || !releaseId) throw new Error('The server returned an invalid app release identifier.');
+              const previousRelease = localStorage.getItem('safarKaabeAppRelease');
+              if (previousRelease && previousRelease !== releaseId) {
+                localStorage.setItem('safarKaabeAppRelease', releaseId);
+                window.location.reload();
+                return;
+              }
+              localStorage.setItem('safarKaabeAppRelease', releaseId);
+            } catch (error) {
+              console.warn('Unable to check for app updates.', error);
+            }
           };
-          checkForAppUpdate();
-          document.addEventListener('visibilitychange', checkForAppUpdate);
-          window.setInterval(checkForAppUpdate, 6 * 60 * 60 * 1000);
+          void checkForAppUpdate();
+          document.addEventListener('visibilitychange', () => { void checkForAppUpdate(); });
+          window.setInterval(() => { void checkForAppUpdate(); }, 5 * 60 * 1000);
         }).catch(error => {
           console.error('Unable to register offline app support.', error);
           showToast('Offline support could not be enabled in this browser.');
