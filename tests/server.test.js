@@ -1671,7 +1671,10 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /Continue as Guest/);
   assert.match(appMarkup, /Continue as Guest|Browse as a guest/);
   assert.match(appMarkup, /id="searchMaxPrice"[^>]*oninput="renderCatalog\(\)"/);
-  assert.match(appMarkup, /id="searchOrigin" type="text" placeholder="Any origin"/);
+  assert.match(appMarkup, /id="travelerSearchFilters"[^>]*role="search"[\s\S]*?Where would you like to go\?[\s\S]*?id="searchOrigin" type="text" placeholder="City or airport name"/);
+  assert.match(appMarkup, /id="searchOriginHelp"[^>]*>For example: Baidoa or BXX\./);
+  assert.match(appMarkup, /id="searchDateHelp"[^>]*>Optional — choose a date to narrow your search\./);
+  assert.match(appMarkup, /id="findTripsButton" type="button" onclick="performGlobalSearch\(\)"/);
   assert.doesNotMatch(appMarkup, /id="searchOrigin"[^>]*value="BXX - Baidoa"/);
   assert.doesNotMatch(appMarkup, /#sharedExploreSection,[\s\S]*?#view_CUSTOMER #popularRoutesSection,[\s\S]*?#view_CUSTOMER #categoryTabs \{[\s\S]*?display: none !important/);
   assert.match(appMarkup, /id="supNewImage" type="file" accept="image\/png,image\/jpeg,image\/webp"/);

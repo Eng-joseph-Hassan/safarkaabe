@@ -716,6 +716,32 @@
       border: 1px solid #1a2335;
       background: #080c14;
     }
+    #travelerSearchFilters > .travel-search-intro { grid-column: 1 / -1; }
+    #travelerSearchFilters .travel-search-label {
+      display: block;
+      margin-bottom: .4rem;
+      color: #e2e8f0;
+      font-size: .75rem;
+      font-weight: 700;
+    }
+    #travelerSearchFilters .travel-search-help {
+      margin-top: .35rem;
+      color: #94a3b8;
+      font-size: .7rem;
+      line-height: 1.4;
+    }
+    #travelerSearchFilters input,
+    #travelerSearchFilters select { min-height: 3rem; }
+    #travelerSearchFilters input:focus,
+    #travelerSearchFilters select:focus {
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 3px rgba(96, 165, 250, .16);
+      outline: none;
+    }
+    #travelerSearchFilters #findTripsButton {
+      min-height: 3rem;
+      font-size: .875rem;
+    }
     #travelerBookingWorkspace {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 360px;
@@ -1606,19 +1632,25 @@
 
         <!-- Search Bar -->
         <div id="travelerSearchFilters" role="search" aria-label="Find a travel offer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 glass-panel p-4 rounded-2xl shadow-lg">
+          <div class="travel-search-intro">
+            <h3 class="text-base font-extrabold text-white sm:text-lg">Where would you like to go?</h3>
+            <p class="mt-1 text-xs text-slate-300">Choose a destination and date to find available trips. You can leave any choice as “All”.</p>
+          </div>
           <div class="sm:col-span-2 lg:col-span-1">
-            <label class="block text-[10px] font-mono-code uppercase font-bold text-slate-400 mb-1">Travel company</label>
-            <select id="searchAgencyFilter" onchange="renderCatalog()" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
-              <option value="ALL">All travel companies</option>
+            <label for="searchAgencyFilter" class="travel-search-label">Travel company</label>
+            <select id="searchAgencyFilter" onchange="renderCatalog()" aria-describedby="searchAgencyHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
+              <option value="ALL">Any travel company</option>
             </select>
+            <p id="searchAgencyHelp" class="travel-search-help">Optional — see offers from every company.</p>
           </div>
           <div>
-            <label class="block text-[10px] font-mono-code uppercase font-bold text-slate-400 mb-1">Starting city or airport</label>
-            <input id="searchOrigin" type="text" placeholder="Any origin" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs" />
+            <label for="searchOrigin" class="travel-search-label">Leaving from</label>
+            <input id="searchOrigin" type="text" placeholder="City or airport name" aria-describedby="searchOriginHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs" />
+            <p id="searchOriginHelp" class="travel-search-help">For example: Baidoa or BXX.</p>
           </div>
           <div>
-            <label class="block text-[10px] font-mono-code uppercase font-bold text-slate-400 mb-1">Going to</label>
-            <select id="searchDest" onchange="renderCatalog()" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
+            <label for="searchDest" class="travel-search-label">Going to</label>
+            <select id="searchDest" onchange="renderCatalog()" aria-describedby="searchDestHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
               <option value="ALL">All destinations</option>
               <option value="MGQ">Mogadishu (MGQ)</option>
               <option value="HGA">Hargeisa (HGA)</option>
@@ -1664,14 +1696,16 @@
               <option value="DXB">Dubai (DXB)</option>
               <option value="BXX">Baidoa (BXX)</option>
             </select>
+            <p id="searchDestHelp" class="travel-search-help">Choose a city, or leave “All destinations”.</p>
           </div>
           <div>
-            <label class="block text-[10px] font-mono-code uppercase font-bold text-slate-400 mb-1">Travel date</label>
-            <input id="searchDate" type="date" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-mono-code font-semibold sm:text-xs" />
+            <label for="searchDate" class="travel-search-label">When do you want to travel?</label>
+            <input id="searchDate" type="date" aria-describedby="searchDateHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs" />
+            <p id="searchDateHelp" class="travel-search-help">Optional — choose a date to narrow your search.</p>
           </div>
           <div class="flex items-end">
-            <button onclick="performGlobalSearch()" class="w-full bg-gradient-to-r from-blue-400 to-blue-500 hover:opacity-95 text-black font-extrabold py-2.5 px-4 rounded-xl text-xs transition shadow-md shadow-blue-500/20">
-            <i class="fa-solid fa-magnifying-glass mr-1.5"></i> Find trips
+            <button id="findTripsButton" type="button" onclick="performGlobalSearch()" class="w-full bg-gradient-to-r from-blue-400 to-blue-500 hover:opacity-95 text-black font-extrabold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-500/20">
+            <i class="fa-solid fa-magnifying-glass mr-1.5" aria-hidden="true"></i> Find trips
             </button>
           </div>
         </div>
