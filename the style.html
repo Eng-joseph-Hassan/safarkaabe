@@ -1531,6 +1531,7 @@
             <div class="flex flex-wrap gap-2 pt-1">
               <button type="button" onclick="selectCategory('FLIGHT'); document.getElementById('searchOrigin').focus()" class="rounded-xl border border-[#C909E6]/40 bg-transparent px-4 py-2.5 text-xs font-extrabold text-[#C909E6] shadow-lg shadow-emerald-950/30"><i class="fa-solid fa-plane-departure mr-2"></i>Compare flight offers</button>
               <button type="button" onclick="openMyTripsModal()" class="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/10"><i class="fa-solid fa-suitcase-rolling mr-2"></i>My bookings</button>
+              <button type="button" onclick="openSampleTicketPreview()" class="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/10"><i class="fa-solid fa-eye mr-2"></i>See sample confirmation</button>
             </div>
           </div>
           <div id="exploreCarousel" class="w-full shrink-0 md:w-[25rem]" role="region" aria-label="Travel inspiration image carousel" aria-roledescription="carousel">
@@ -2174,6 +2175,62 @@
       </div>
       <div class="min-h-0 flex-1 overflow-auto bg-slate-200 p-2 sm:p-5"><div class="flex items-center gap-2 px-2 py-1"><p id="ticketPdfStatus" class="text-xs text-slate-700" role="status">Loading saved ticket PDF…</p><button id="ticketPdfRetryButton" type="button" onclick="reloadTicketPdf()" class="hidden rounded-lg bg-rose-100 px-2 py-1 text-xs font-bold text-rose-800">Retry preview</button></div><iframe id="ticketPdfFrame" title="Booking confirmation PDF preview" class="h-[calc(100%-2.5rem)] min-h-[28rem] w-full rounded-xl bg-white" loading="lazy"></iframe><img id="ticketJpgFallback" class="hidden mx-auto max-h-full max-w-full rounded-xl bg-white object-contain shadow-xl" alt="Saved booking confirmation JPG preview" /></div>
     </div>
+  </div>
+
+  <div id="sampleTicketModal" class="fixed inset-0 z-[70] hidden items-center justify-center overflow-y-auto bg-black/85 p-3 backdrop-blur-md sm:p-6" role="dialog" aria-modal="true" aria-labelledby="sampleTicketTitle">
+    <section class="relative my-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-blue-400/25 bg-[#101827] shadow-2xl">
+      <div class="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-7">
+        <div>
+          <h2 id="sampleTicketTitle" class="text-base font-extrabold text-white sm:text-lg">Sample booking confirmation</h2>
+          <p class="mt-1 text-xs text-slate-400">Example only — your real document is issued after agency approval.</p>
+        </div>
+        <button type="button" onclick="closeSampleTicketPreview()" class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/15" aria-label="Close sample confirmation"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-4 sm:p-7">
+        <article class="relative overflow-hidden rounded-2xl bg-white text-slate-900 shadow-xl" aria-label="Example booking confirmation">
+          <div class="absolute right-3 top-16 -rotate-12 rounded-lg border-4 border-rose-500/30 px-3 py-1 text-xl font-black uppercase tracking-[.25em] text-rose-500/40 sm:right-8 sm:top-20 sm:text-3xl" aria-hidden="true">Sample</div>
+          <header class="relative bg-[#101c35] px-5 py-5 text-white sm:px-8">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-[10px] font-bold uppercase tracking-[.22em] text-blue-200">SAFAR KAABE</p>
+                <h3 class="mt-1 text-lg font-extrabold sm:text-2xl">Booking confirmation</h3>
+                <p class="mt-1 text-xs text-slate-300">Issued after your travel agency approves the booking</p>
+              </div>
+              <span class="rounded-full border border-emerald-300/40 bg-emerald-300/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-emerald-200">Example</span>
+            </div>
+            <div class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-white/5 px-3 py-2.5 font-mono text-xs">
+              <span class="text-slate-400">REFERENCE</span>
+              <span class="font-bold text-white">SAMPLE ONLY</span>
+            </div>
+          </header>
+          <div class="grid gap-5 px-5 py-6 sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:px-8">
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Leaving from</p>
+              <p class="mt-1 text-xl font-extrabold sm:text-2xl">Mogadishu</p>
+              <p class="text-xs font-semibold text-slate-500">MGQ · Example route</p>
+            </div>
+            <div class="hidden text-2xl text-blue-600 sm:block" aria-hidden="true"><i class="fa-solid fa-arrow-right-long"></i></div>
+            <div class="sm:text-right">
+              <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Going to</p>
+              <p class="mt-1 text-xl font-extrabold sm:text-2xl">Nairobi</p>
+              <p class="text-xs font-semibold text-slate-500">NBO · Example route</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 border-t border-dashed border-slate-300 px-5 py-5 sm:grid-cols-4 sm:px-8">
+            <div><p class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Traveler</p><p class="mt-1 text-sm font-bold">Sample traveler</p></div>
+            <div><p class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Travel date</p><p class="mt-1 text-sm font-bold">To be confirmed</p></div>
+            <div><p class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Travel agency</p><p class="mt-1 text-sm font-bold">Example agency</p></div>
+            <div><p class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Status</p><p class="mt-1 text-sm font-bold text-emerald-700">Approved example</p></div>
+          </div>
+          <footer class="border-t border-slate-200 bg-slate-50 px-5 py-4 text-xs leading-relaxed text-slate-600 sm:px-8">
+            This sample is for preview only. It is not a real booking, ticket, airline confirmation, or travel document. Real details are supplied by the agency after approval.
+          </footer>
+        </article>
+      </div>
+      <div class="flex justify-end border-t border-white/10 px-5 py-4 sm:px-7">
+        <button type="button" onclick="closeSampleTicketPreview()" class="rounded-xl bg-blue-500 px-5 py-2.5 text-xs font-extrabold text-white hover:bg-blue-400">Close preview</button>
+      </div>
+    </section>
   </div>
 
   <div id="messagesPage" class="fixed inset-0 z-50 hidden flex-col bg-[#0b141a]" role="region" aria-labelledby="messagesTitle">
@@ -7323,6 +7380,18 @@
     function closeMyTripsModal() {
       document.getElementById('tripsModal').classList.add('hidden');
       document.getElementById('tripsModal').classList.remove('flex');
+    }
+
+    function openSampleTicketPreview() {
+      const modal = document.getElementById('sampleTicketModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeSampleTicketPreview() {
+      const modal = document.getElementById('sampleTicketModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
     }
 
     async function openBookingTicket(bookingId) {
