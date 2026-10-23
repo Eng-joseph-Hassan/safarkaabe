@@ -1,0 +1,111 @@
+name: iOS App Store Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    environment: app-store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run ios:sync
+      - name: Check App Store signing secrets
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          : "${IOS_CERTIFICATE_BASE64:?Add IOS_CERTIFICATE_BASE64 to the app-store environment secrets}"
+          : "${IOS_CERTIFICATE_PASSWORD:?Add IOS_CERTIFICATE_PASSWORD to the app-store environment secrets}"
+          : "${IOS_PROVISIONING_PROFILE_BASE64:?Add IOS_PROVISIONING_PROFILE_BASE64 to the app-store environment secrets}"
+          : "${IOS_TEAM_ID:?Add IOS_TEAM_ID to the app-store environment secrets}"
+      - name: Import Apple distribution certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      - name: Archive and export signed App Store IPA
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          : "${IOS_TEAM_ID:?Add IOS_TEAM_ID to the app-store environment secrets}"
+          : "${IOS_PROVISIONING_PROFILE_BASE64:?Add IOS_PROVISIONING_PROFILE_BASE64 to the app-store environment secrets}"
+
+          profile_path="$RUNNER_TEMP/app-store.mobileprovision"
+          decoded_profile="$RUNNER_TEMP/app-store-profile.plist"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -D > "$profile_path"
+          security cms -D -i "$profile_path" > "$decoded_profile"
+
+          profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded_profile")
+          profile_app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded_profile")
+          profile_team_id=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded_profile")
+          get_task_allow=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:get-task-allow' "$decoded_profile")
+          expected_app_id="${IOS_TEAM_ID}.com.safarkaabe.travel"
+
+          if [ "$profile_team_id" != "$IOS_TEAM_ID" ] || [ "$profile_app_id" != "$expected_app_id" ] || [ "$get_task_allow" != "false" ]; then
+            echo "The provisioning profile must be an App Store distribution profile for com.safarkaabe.travel and IOS_TEAM_ID."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_profile")
+          cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+
+          export IOS_PROFILE_NAME="$profile_name"
+          export IOS_BUILD_NUMBER="$((32 + GITHUB_RUN_NUMBER))"
+          python3 - <<'PY'
+          import os
+          import plistlib
+
+          options = {
+              "method": "app-store-connect",
+              "signingStyle": "manual",
+              "teamID": os.environ["IOS_TEAM_ID"],
+              "provisioningProfiles": {
+                  "com.safarkaabe.travel": os.environ["IOS_PROFILE_NAME"],
+              },
+          }
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "ExportOptions.plist"), "wb") as output:
+              plistlib.dump(options, output)
+          PY
+
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/SAFAR-KAABE.xcarchive" \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$profile_name" \
+            CURRENT_PROJECT_VERSION="$IOS_BUILD_NUMBER" \
+            archive
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/SAFAR-KAABE.xcarchive" \
+            -exportPath "$RUNNER_TEMP/app-store-export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+          test -s "$RUNNER_TEMP/app-store-export/App.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safar-kaabe-app-store-ipa
+          path: ${{ runner.temp }}/app-store-export/App.ipa
+          if-no-files-found: error
+          retention-days: 14

@@ -92,7 +92,9 @@ The iOS project requires macOS with Xcode and CocoaPods to build or run on an Ap
 3. Open `ios/App/App.xcworkspace` in Xcode, select the `App` scheme and an iPhone/iPad simulator or device, then build and run.
 4. For App Store distribution, set the Apple Developer Team and signing profile in Xcode, use a unique registered bundle identifier if `com.safarkaabe.travel` is not available, and archive the `App` scheme for App Store Connect.
 
-The iOS app loads the production site over HTTPS. Capacitor's native platform detection distinguishes iOS from Android even though the shared remote URL retains the Android query parameter. Camera and microphone permission descriptions are included for WebRTC calls. The GitHub Actions iOS workflow builds an unsigned iOS Simulator app for CI; it does not create an App Store-signed archive.
+The iOS app loads the production site over HTTPS. Capacitor's native platform detection distinguishes iOS from Android even though the shared remote URL retains the Android query parameter. Camera and microphone permission descriptions are included for WebRTC calls. The GitHub Actions iOS workflow builds an unsigned iOS Simulator app for CI.
+
+To create an App Store Connect IPA, register `com.safarkaabe.travel` in an active Apple Developer account and create an Apple Distribution certificate (`.p12`) and matching App Store provisioning profile. In GitHub repository Settings > Environments, create the `app-store` environment and add these secrets there: `IOS_CERTIFICATE_BASE64` (base64-encoded `.p12`), `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` (base64-encoded `.mobileprovision`), and `IOS_TEAM_ID`. Then run the **iOS App Store Package** workflow from the default branch. The signed IPA is uploaded as the `safar-kaabe-app-store-ipa` artifact; it can be submitted to App Store Connect or TestFlight, but this workflow does not upload or publish it. Never put signing files or passwords in the repository or chat.
 
 Regenerate the web icons, Android launcher icons, and native launch-screen images from `safar-kaabe-brand.png` with:
 

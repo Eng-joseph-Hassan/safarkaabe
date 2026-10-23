@@ -1811,6 +1811,9 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const iosWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-build.yml'), 'utf8');
   assert.match(iosWorkflow, /runs-on: macos-15/);
   assert.match(iosWorkflow, /xcodebuild/);
+  const iosAppStoreWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-appstore.yml'), 'utf8');
+  assert.match(iosAppStoreWorkflow, /workflow_dispatch/);
+  assert.match(iosAppStoreWorkflow, /IOS_PROVISIONING_PROFILE_BASE64/);
   assert.match(appMarkup, /mobileTravelerSignUpButton'\)\.classList\.toggle\('hidden', !guest\)/);
   assert.match(appMarkup, /Agency staff, Super Admin and traveler accounts/);
   assert.match(appMarkup, /Choose an offer above to start a request\./);
