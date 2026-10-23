@@ -1264,7 +1264,7 @@
         </select>
       </label>
       <div class="grid grid-cols-2 gap-2">
-        <button id="mobileInstallAppButton" onclick="installApp()" class="hidden rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2.5 text-left text-xs font-bold text-blue-200"><i class="fa-solid fa-download mr-2"></i>Install app</button>
+        <button id="mobileInstallAppButton" onclick="installApp()" class="hidden rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2.5 text-left text-xs font-bold text-blue-200"><i class="fa-solid fa-download mr-2"></i><span id="mobileInstallAppLabel">Install app</span></button>
         <button id="mobileTravelerSignInButton" onclick="openAuthGate('login'); closeMobileMenu()" class="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2.5 text-left text-xs font-bold text-blue-200"><i class="fa-solid fa-right-to-bracket mr-2"></i>Traveler sign in</button>
         <button id="mobileTravelerSignUpButton" onclick="openAuthGate('register'); closeMobileMenu()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-user-plus mr-2 text-blue-300"></i>Create traveler account</button>
         <button id="mobileStaffSignInButton" onclick="openAuthGate('login'); closeMobileMenu()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-building-user mr-2 text-blue-300"></i>Agency / staff sign in</button>
@@ -1487,7 +1487,7 @@
             <span id="mobileHeaderNotificationsBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
           </button>
           <button id="installAppButton" onclick="installApp()" class="hidden rounded-xl border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-[11px] font-bold text-blue-200 hover:bg-blue-500/25" type="button">
-            <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Install app</span><span class="sm:hidden">Install</span>
+            <i class="fa-solid fa-download mr-1"></i><span id="installAppLabel" class="hidden sm:inline">Install app</span><span id="installAppMobileLabel" class="sm:hidden">Install</span>
           </button>
           <div class="hidden rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 font-mono-code text-[11px] text-amber-300 md:block">
             ● Sandbox Mode Active
@@ -2489,6 +2489,23 @@
     </form>
   </div>
 
+  <div id="iosInstallInstructions" class="fixed inset-0 z-[85] hidden items-center justify-center bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="iosInstallInstructionsTitle" onclick="if(event.target===this)closeIOSInstallInstructions()">
+    <section class="w-full max-w-md space-y-5 rounded-3xl border border-white/10 bg-[#111b21] p-5 shadow-2xl sm:p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div><h2 id="iosInstallInstructionsTitle" class="text-lg font-extrabold text-white">Add SAFAR KAABE to your Home Screen</h2><p class="mt-1 text-xs text-slate-400">Install the website shortcut from Safari on your iPhone.</p></div>
+        <button type="button" onclick="closeIOSInstallInstructions()" class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5 text-slate-300" aria-label="Close install instructions"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      </div>
+      <ol class="list-decimal space-y-3 pl-5 text-sm leading-relaxed text-slate-200">
+        <li>Open this page in Safari.</li>
+        <li>Tap Safari's <strong class="text-white">Share</strong> button <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i>.</li>
+        <li>Scroll and tap <strong class="text-white">Add to Home Screen</strong>.</li>
+        <li>Tap <strong class="text-white">Add</strong> to finish.</li>
+      </ol>
+      <p class="rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-slate-400">This adds the SAFAR KAABE website to your Home Screen. It is not an App Store download.</p>
+      <button type="button" onclick="closeIOSInstallInstructions()" class="w-full rounded-xl bg-blue-400 px-4 py-3 text-sm font-extrabold text-[#06111b]">Got it</button>
+    </section>
+  </div>
+
   <div id="toastBox" class="fixed bottom-5 right-5 bg-[#0D1322] border border-blue-500/50 text-white text-xs font-semibold px-4 py-3.5 rounded-2xl shadow-2xl hidden z-50 flex items-center gap-2.5 no-print">
     <i class="fa-solid fa-circle-check text-blue-400 text-sm"></i>
     <span id="toastText"></span>
@@ -2508,6 +2525,12 @@
     }
     const savedExploreVideoState = readExploreVideoState();
     const IS_NATIVE_APP = document.documentElement.classList.contains('capacitor-native');
+    const IS_IOS_SAFARI = !IS_NATIVE_APP
+      && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+      && /Safari/i.test(navigator.userAgent)
+      && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(navigator.userAgent)
+      && !navigator.standalone
+      && !window.matchMedia('(display-mode: standalone)').matches;
     let currentLocale = 'en';
     let currentCurrency = 'USD';
     let currentPortal = 'CUSTOMER';
@@ -7657,6 +7680,12 @@
     }
 
     async function installApp() {
+      if (IS_IOS_SAFARI) {
+        document.getElementById('iosInstallInstructions').classList.remove('hidden');
+        document.getElementById('iosInstallInstructions').classList.add('flex');
+        closeMobileMenu();
+        return;
+      }
       if (!deferredInstallPrompt) return;
       try {
         await deferredInstallPrompt.prompt();
@@ -7671,11 +7700,36 @@
       }
     }
 
+    function closeIOSInstallInstructions() {
+      const instructions = document.getElementById('iosInstallInstructions');
+      instructions.classList.add('hidden');
+      instructions.classList.remove('flex');
+    }
+
+    function showInstallButtons() {
+      const isVisible = IS_IOS_SAFARI || Boolean(deferredInstallPrompt);
+      document.getElementById('installAppButton').classList.toggle('hidden', !isVisible);
+      document.getElementById('mobileInstallAppButton').classList.toggle('hidden', !isVisible);
+      if (IS_IOS_SAFARI) {
+        document.getElementById('installAppLabel').textContent = 'Add to Home Screen';
+        document.getElementById('installAppMobileLabel').textContent = 'Add to Home Screen';
+        document.getElementById('mobileInstallAppLabel').textContent = 'Add to Home Screen';
+        document.getElementById('installAppButton').setAttribute('aria-label', 'Add SAFAR KAABE to your iPhone Home Screen');
+        document.getElementById('mobileInstallAppButton').setAttribute('aria-label', 'Add SAFAR KAABE to your iPhone Home Screen');
+      }
+    }
+
     window.addEventListener('beforeinstallprompt', event => {
       event.preventDefault();
       deferredInstallPrompt = event;
       document.getElementById('installAppButton').classList.remove('hidden');
-      document.getElementById('mobileInstallAppButton').classList.remove('hidden');
+      showInstallButtons();
+    });
+
+    if (IS_IOS_SAFARI) showInstallButtons();
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      showInstallButtons();
     });
 
     window.addEventListener('DOMContentLoaded', async () => {
