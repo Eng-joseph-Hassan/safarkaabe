@@ -1788,7 +1788,9 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.doesNotMatch(appMarkup, /function updateExploreCarouselAspectRatio\(\)/);
   assert.match(appMarkup, /async function continueToAndroidExplore\(\)/);
   assert.match(appMarkup, /onclick="continueToAndroidExplore\(\)"/);
-  assert.match(appMarkup, /classList\.toggle\('hidden', IS_ANDROID_APP\)/);
+  assert.match(appMarkup, /classList\.toggle\('hidden', IS_NATIVE_APP\)/);
+  assert.match(appMarkup, /window\.Capacitor\.getPlatform\(\)/);
+  assert.match(appMarkup, /capacitor-native/);
   assert.match(appMarkup, /AGENCY: canAccessPortal\('AGENCY'\)/);
   assert.match(appMarkup, /SUPPLIER: canAccessPortal\('SUPPLIER'\)/);
   assert.match(appMarkup, /ADMIN: canAccessPortal\('ADMIN'\)/);
@@ -1797,6 +1799,18 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /id="mobileTravelerSignInButton" onclick="openAuthGate\('login'\); closeMobileMenu\(\)"/);
   assert.match(appMarkup, /id="mobileTravelerSignUpButton" onclick="openAuthGate\('register'\); closeMobileMenu\(\)"/);
   assert.match(appMarkup, /id="mobileStaffSignInButton" onclick="openAuthGate\('login'\); closeMobileMenu\(\)"/);
+  const packageManifest = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.equal(packageManifest.dependencies['@capacitor/ios'], packageManifest.dependencies['@capacitor/core'],
+    'the iOS platform version matches Capacitor core');
+  const iosProject = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App.xcodeproj', 'project.pbxproj'), 'utf8');
+  assert.match(iosProject, /PRODUCT_BUNDLE_IDENTIFIER = com\.safarkaabe\.travel/);
+  assert.match(iosProject, /IPHONEOS_DEPLOYMENT_TARGET = 14\.0/);
+  const iosInfoPlist = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App', 'Info.plist'), 'utf8');
+  assert.match(iosInfoPlist, /NSCameraUsageDescription/);
+  assert.match(iosInfoPlist, /NSMicrophoneUsageDescription/);
+  const iosWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-build.yml'), 'utf8');
+  assert.match(iosWorkflow, /runs-on: macos-15/);
+  assert.match(iosWorkflow, /xcodebuild/);
   assert.match(appMarkup, /mobileTravelerSignUpButton'\)\.classList\.toggle\('hidden', !guest\)/);
   assert.match(appMarkup, /Agency staff, Super Admin and traveler accounts/);
   assert.match(appMarkup, /Choose an offer above to start a request\./);
