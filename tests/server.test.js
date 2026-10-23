@@ -1706,7 +1706,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /My Trips & Vouchers/);
   assert.match(appMarkup, /id="myTripsSearch"/);
   assert.match(appMarkup, /id="myTripsFilter"/);
-  assert.match(appMarkup, /onclick="openSampleTicketPreview\(\)"[^>]*>[\s\S]*?See sample confirmation/);
+  assert.doesNotMatch(appMarkup, /See sample confirmation/);
   assert.match(appMarkup, /id="sampleTicketModal"[^>]*role="dialog"/);
   assert.match(appMarkup, /This sample is for preview only\. It is not a real booking, ticket, airline confirmation, or travel document\./);
   assert.match(appMarkup, /function openSampleTicketPreview\(\)/);
