@@ -141,8 +141,8 @@
       object-fit: contain;
       image-rendering: auto;
     }
-    html.capacitor-android:not(.android-auth-visible) #authGate { display: none !important; }
-    html.capacitor-android.android-auth-visible #authGate:not(.hidden) { display: flex !important; }
+    html.capacitor-native:not(.android-auth-visible) #authGate { display: none !important; }
+    html.capacitor-native.android-auth-visible #authGate:not(.hidden) { display: flex !important; }
     #androidLaunchExperience {
       position: fixed;
       z-index: 100;
@@ -161,8 +161,8 @@
       color: #f8fafc;
       font-family: 'Plus Jakarta Sans', sans-serif;
     }
-    html.capacitor-android:not(.android-launch-hidden) #androidLaunchExperience { display: flex; }
-    html.capacitor-android:not(.android-launch-hidden) #appLoadingIndicator { display: none !important; }
+    html.capacitor-native:not(.android-launch-hidden) #androidLaunchExperience { display: flex; }
+    html.capacitor-native:not(.android-launch-hidden) #appLoadingIndicator { display: none !important; }
     #androidLaunchExperience::before,
     #androidLaunchExperience::after {
       position: absolute;
@@ -238,12 +238,12 @@
       transform: translateY(1rem);
       visibility: hidden;
     }
-    html.capacitor-android.android-welcome-ready .android-launch-splash {
+    html.capacitor-native.android-welcome-ready .android-launch-splash {
       opacity: 0;
       transform: scale(0.96);
       visibility: hidden;
     }
-    html.capacitor-android.android-welcome-ready .android-launch-welcome {
+    html.capacitor-native.android-welcome-ready .android-launch-welcome {
       opacity: 1;
       transform: translateY(0);
       visibility: visible;
@@ -1173,8 +1173,13 @@
     #messagesPage #conversationMessages > div.self-end > div { background: rgba(255,255,255,.035) !important; }
   </style>
   <script>
-    if (new URLSearchParams(location.search).get('platform') === 'android') {
-      document.documentElement.classList.add('capacitor-android');
+    const capacitorPlatform = window.Capacitor && typeof window.Capacitor.getPlatform === 'function'
+      ? window.Capacitor.getPlatform()
+      : '';
+    const requestedPlatform = new URLSearchParams(location.search).get('platform');
+    const appPlatform = capacitorPlatform || requestedPlatform;
+    if (appPlatform === 'android' || appPlatform === 'ios') {
+      document.documentElement.classList.add('capacitor-native', `capacitor-${appPlatform}`);
     }
   </script>
 </head>
@@ -2491,7 +2496,18 @@
 
   <script>
     const EXCHANGE_RATES = { USD: 1, SOS: 570, EUR: 0.92 };
-    const IS_ANDROID_APP = document.documentElement.classList.contains('capacitor-android');
+    const EXPLORE_VIDEO_STATE_KEY = 'safar_kaabe_explore_video_state';
+    function readExploreVideoState() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(EXPLORE_VIDEO_STATE_KEY) || '{}');
+        return saved && typeof saved === 'object' ? saved : {};
+      } catch (error) {
+        console.warn('Unable to restore travel video playback state.', error);
+        return {};
+      }
+    }
+    const savedExploreVideoState = readExploreVideoState();
+    const IS_NATIVE_APP = document.documentElement.classList.contains('capacitor-native');
     let currentLocale = 'en';
     let currentCurrency = 'USD';
     let currentPortal = 'CUSTOMER';
@@ -2899,7 +2915,7 @@
       pendingAndroidAuthError = errorMessage;
       document.documentElement.classList.remove('android-launch-hidden', 'android-welcome-ready');
       window.setTimeout(() => {
-        if (IS_ANDROID_APP && !document.documentElement.classList.contains('android-launch-hidden')) {
+        if (IS_NATIVE_APP && !document.documentElement.classList.contains('android-launch-hidden')) {
           document.documentElement.classList.add('android-welcome-ready');
         }
       }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 20 : 1400);
@@ -3077,7 +3093,7 @@
       document.getElementById('roleBadgeText').textContent = 'Guest traveler';
       document.getElementById('roleBadge').title = 'Browse without an account';
       document.getElementById('mobileMenuRole').textContent = 'Explore without an account';
-      document.getElementById('headerSignInButton').classList.toggle('hidden', IS_ANDROID_APP);
+      document.getElementById('headerSignInButton').classList.toggle('hidden', IS_NATIVE_APP);
       document.getElementById('mobileTravelerSignInButton').classList.remove('hidden');
       document.getElementById('mobileTravelerSignUpButton').classList.remove('hidden');
       document.getElementById('mobileStaffSignInButton').classList.remove('hidden');
@@ -3237,7 +3253,7 @@
       bookingButtons.forEach(button => {
         if (button) button.classList.toggle('hidden', currentUser?.role === 'AGENCY');
       });
-      document.getElementById('headerSignInButton').classList.toggle('hidden', !guest || IS_ANDROID_APP);
+      document.getElementById('headerSignInButton').classList.toggle('hidden', !guest || IS_NATIVE_APP);
       document.getElementById('mobileTravelerSignInButton').classList.toggle('hidden', !guest);
       document.getElementById('mobileTravelerSignUpButton').classList.toggle('hidden', !guest);
       document.getElementById('mobileStaffSignInButton').classList.toggle('hidden', !guest);

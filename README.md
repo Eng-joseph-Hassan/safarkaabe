@@ -83,6 +83,17 @@ cd android
 
 The APK is at `android/app/build/outputs/apk/debug/app-debug.apk`. Install it on a USB-connected, authorized Android phone with `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`, or copy the APK to the phone and open it. Allow installation from that source if Android asks. This local-network build uses HTTP; do not expose it to public networks.
 
+## iOS app
+
+The iOS project requires macOS with Xcode and CocoaPods to build or run on an Apple device. Windows can sync the Capacitor project but cannot compile an iOS app.
+
+1. Install Xcode and CocoaPods on a Mac, then clone this repository and run `npm ci`.
+2. Run `npm run ios:sync` to install native dependencies and copy the app configuration.
+3. Open `ios/App/App.xcworkspace` in Xcode, select the `App` scheme and an iPhone/iPad simulator or device, then build and run.
+4. For App Store distribution, set the Apple Developer Team and signing profile in Xcode, use a unique registered bundle identifier if `com.safarkaabe.travel` is not available, and archive the `App` scheme for App Store Connect.
+
+The iOS app loads the production site over HTTPS. Capacitor's native platform detection distinguishes iOS from Android even though the shared remote URL retains the Android query parameter. Camera and microphone permission descriptions are included for WebRTC calls. The GitHub Actions iOS workflow builds an unsigned iOS Simulator app for CI; it does not create an App Store-signed archive.
+
 Regenerate the web icons, Android launcher icons, and native launch-screen images from `safar-kaabe-brand.png` with:
 
 ```powershell

@@ -9,11 +9,13 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "db:migrate:neon": "node scripts/migrate-sqlite-to-neon.js"
+    "db:migrate:neon": "node scripts/migrate-sqlite-to-neon.js",
+    "ios:sync": "cap sync ios"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",
     "@capacitor/core": "^7.6.9",
+    "@capacitor/ios": "^7.6.9",
     "@napi-rs/canvas": "^1.0.13",
     "@neondatabase/serverless": "^1.0.2",
     "nodemailer": "^10.1.7",
