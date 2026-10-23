@@ -46,6 +46,7 @@ if (webPushConfigured) {
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.jpeg': 'image/jpeg',
+  '.mp4': 'video/mp4',
   '.png': 'image/png',
   '.js': 'text/javascript; charset=utf-8',
   '.jpg': 'image/jpeg',
@@ -3839,11 +3840,45 @@ async function handleApi(request, response, url) {
       response.writeHead(404).end('Not found');
       return;
     }
-    response.writeHead(200, {
+    const headers = {
       'Content-Type': mimeType(filePath),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': ['the style.html', 'sw.js'].includes(path.basename(filePath)) ? 'no-cache' : 'public, max-age=3600'
-    });
+    };
+    const isVideo = path.extname(filePath).toLowerCase() === '.mp4';
+    const range = isVideo ? request.headers.range : null;
+    if (isVideo) headers['Accept-Ranges'] = 'bytes';
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      let start;
+      let end;
+      if (match && (match[1] || match[2])) {
+        if (!match[1]) {
+          const suffixLength = Number(match[2]);
+          if (Number.isSafeInteger(suffixLength) && suffixLength > 0) {
+            start = Math.max(stats.size - suffixLength, 0);
+            end = stats.size - 1;
+          }
+        } else {
+          start = Number(match[1]);
+          end = match[2] ? Number(match[2]) : stats.size - 1;
+        }
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= stats.size || end < start) {
+        response.writeHead(416, { 'Accept-Ranges': 'bytes', 'Content-Range': `bytes */${stats.size}` }).end();
+        return;
+      }
+      end = Math.min(end, stats.size - 1);
+      response.writeHead(206, {
+        ...headers,
+        'Content-Length': end - start + 1,
+        'Content-Range': `bytes ${start}-${end}/${stats.size}`
+      });
+      fs.createReadStream(filePath, { start, end }).pipe(response);
+      return;
+    }
+    if (isVideo) headers['Content-Length'] = stats.size;
+    response.writeHead(200, headers);
     fs.createReadStream(filePath).pipe(response);
   });
 }

@@ -1063,6 +1063,15 @@
       object-fit: cover;
       object-position: center;
     }
+    .explore-slide video {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+    }
     #welcomeOnboarding {
       position: fixed;
       z-index: 90;
@@ -1538,53 +1547,59 @@
               <button type="button" onclick="openMyTripsModal()" class="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/10"><i class="fa-solid fa-suitcase-rolling mr-2"></i>My bookings</button>
             </div>
           </div>
-          <div id="exploreCarousel" class="w-full shrink-0 md:w-[25rem]" role="region" aria-label="Travel inspiration image carousel" aria-roledescription="carousel">
+          <div id="exploreCarousel" class="w-full shrink-0 md:w-[25rem]" role="region" aria-label="Travel inspiration carousel" aria-roledescription="carousel">
             <div class="explore-carousel-frame relative overflow-hidden rounded-2xl border border-white/15 shadow-xl">
-              <div class="explore-slide" data-slide="0" role="group" aria-roledescription="slide" aria-label="1 of 9: Discover the world">
+              <div class="explore-slide" data-slide="0" role="group" aria-roledescription="slide" aria-label="1 of 10: Discover the world">
                 <img src="image 1.jpg" alt="Airplane flying past famous world landmarks" fetchpriority="high" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Discover the world</span>
               </div>
-              <div class="explore-slide hidden" data-slide="1" role="group" aria-roledescription="slide" aria-label="2 of 9: Plan your next getaway">
+              <div class="explore-slide hidden" data-slide="1" role="group" aria-roledescription="slide" aria-label="2 of 10: Plan your next getaway">
                 <img src="image 2.jpg" alt="Suitcase, airplane and international landmarks" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Plan your next getaway</span>
               </div>
-              <div class="explore-slide hidden" data-slide="2" role="group" aria-roledescription="slide" aria-label="3 of 9: Find your island escape">
+              <div class="explore-slide hidden" data-slide="2" role="group" aria-roledescription="slide" aria-label="3 of 10: Find your island escape">
                 <img src="image 3.jpg" alt="Airplane above a tropical island" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Find your island escape</span>
               </div>
-              <div class="explore-slide hidden" data-slide="3" role="group" aria-roledescription="slide" aria-label="4 of 9: Your next flight awaits">
+              <div class="explore-slide hidden" data-slide="3" role="group" aria-roledescription="slide" aria-label="4 of 10: Your next flight awaits">
                 <img src="image 4.jpg" alt="Airplane, passport and boarding passes" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Your next flight awaits</span>
               </div>
-              <div class="explore-slide hidden" data-slide="4" role="group" aria-roledescription="slide" aria-label="5 of 9: Travel made simple">
+              <div class="explore-slide hidden" data-slide="4" role="group" aria-roledescription="slide" aria-label="5 of 10: Travel made simple">
                 <img src="image 5.jpg" alt="Digital travel services on a smartphone" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Travel made simple</span>
               </div>
-              <div class="explore-slide hidden" data-slide="5" role="group" aria-roledescription="slide" aria-label="6 of 9: Ready for takeoff">
+              <div class="explore-slide hidden" data-slide="5" role="group" aria-roledescription="slide" aria-label="6 of 10: Ready for takeoff">
                 <img src="image 6.jpg" alt="Traveler holding a passport and boarding pass" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Ready for takeoff</span>
               </div>
-              <div class="explore-slide hidden" data-slide="6" role="group" aria-roledescription="slide" aria-label="7 of 9: Start your journey">
+              <div class="explore-slide hidden" data-slide="6" role="group" aria-roledescription="slide" aria-label="7 of 10: Start your journey">
                 <img src="image 7.jpg" alt="Hand holding a passport and flight tickets" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Start your journey</span>
               </div>
-              <div class="explore-slide hidden" data-slide="7" role="group" aria-roledescription="slide" aria-label="8 of 9: Begin your Umrah journey">
+              <div class="explore-slide hidden" data-slide="7" role="group" aria-roledescription="slide" aria-label="8 of 10: Begin your Umrah journey">
                 <img src="image 8.jpg" alt="Pilgrims preparing for an Umrah journey at the Kaaba" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Begin your Umrah journey</span>
               </div>
-              <div class="explore-slide hidden" data-slide="8" role="group" aria-roledescription="slide" aria-label="9 of 9: Discover the holy city">
+              <div class="explore-slide hidden" data-slide="8" role="group" aria-roledescription="slide" aria-label="9 of 10: Discover the holy city">
                 <img src="image 9.jpg" alt="Illustrated view of the Kaaba and the Grand Mosque" loading="lazy" />
                 <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-10 text-xs font-bold text-white">Discover the holy city</span>
               </div>
-              <button type="button" onclick="moveExploreSlide(-1)" class="absolute left-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white backdrop-blur hover:bg-black/75" aria-label="Previous travel image">
+              <div class="explore-slide hidden" data-slide="9" role="group" aria-roledescription="slide" aria-label="10 of 10: Travel highlights">
+                <video src="adss.mp4" controls playsinline preload="none" poster="image 1.jpg" aria-label="SAFAR KAABE travel highlights video"></video>
+                <button type="button" onclick="enableExploreVideoSound()" class="hidden absolute left-3 top-3 z-10 rounded-lg border border-white/20 bg-black/70 px-3 py-2 text-xs font-bold text-white backdrop-blur hover:bg-black/85" aria-label="Enable video sound">
+                  <i class="fa-solid fa-volume-high mr-1.5" aria-hidden="true"></i>Tap for sound
+                </button>
+              </div>
+              <button type="button" onclick="moveExploreSlide(-1)" class="absolute left-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white backdrop-blur hover:bg-black/75" aria-label="Previous travel slide">
                 <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
               </button>
-              <button type="button" onclick="moveExploreSlide(1)" class="absolute right-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white backdrop-blur hover:bg-black/75" aria-label="Next travel image">
+              <button type="button" onclick="moveExploreSlide(1)" class="absolute right-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white backdrop-blur hover:bg-black/75" aria-label="Next travel slide">
                 <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
               </button>
-              <span id="exploreSlideCount" class="absolute right-3 top-3 z-10 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 font-mono-code text-[10px] font-bold text-white" aria-live="polite">1 / 9</span>
+              <span id="exploreSlideCount" class="absolute right-3 top-3 z-10 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 font-mono-code text-[10px] font-bold text-white" aria-live="polite">1 / 10</span>
             </div>
-            <div class="mt-3 flex items-center justify-center gap-1.5" aria-label="Choose a travel image">
+            <div class="mt-3 flex items-center justify-center gap-1.5" aria-label="Choose a travel slide">
               <button type="button" onclick="setExploreSlide(0)" class="explore-slide-dot h-1.5 w-5 rounded-full bg-blue-400 transition-all" aria-label="Show image 1" aria-current="true"></button>
               <button type="button" onclick="setExploreSlide(1)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show image 2"></button>
               <button type="button" onclick="setExploreSlide(2)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show image 3"></button>
@@ -1594,6 +1609,7 @@
               <button type="button" onclick="setExploreSlide(6)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show image 7"></button>
               <button type="button" onclick="setExploreSlide(7)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show image 8"></button>
               <button type="button" onclick="setExploreSlide(8)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show image 9"></button>
+              <button type="button" onclick="setExploreSlide(9)" class="explore-slide-dot h-1.5 w-1.5 rounded-full bg-white/35 transition-all" aria-label="Show travel video 10"></button>
             </div>
           </div>
         </div>
@@ -2533,7 +2549,12 @@
     let currentLocale = 'en';
     let currentCurrency = 'USD';
     let currentPortal = 'CUSTOMER';
-    let currentExploreSlide = 0;
+    let currentExploreSlide = savedExploreVideoState.active ? 9 : 0;
+    let exploreVideoIsInView = false;
+    let exploreVideoSoundEnabled = savedExploreVideoState.soundEnabled === true;
+    let exploreVideoResumeTime = Number.isFinite(savedExploreVideoState.currentTime) && savedExploreVideoState.currentTime > 0
+      ? savedExploreVideoState.currentTime
+      : null;
     let editingSupplierProductId = null;
     let editingSupplierProductImageUrl = null;
     let currentCategory = 'ALL';
@@ -5521,8 +5542,21 @@
           const imageUrl = new URL(image.getAttribute('src'), document.baseURI).href;
           slide.style.setProperty('--slide-image', `url("${imageUrl}")`);
         }
-        slide.classList.toggle('hidden', slideIndex !== currentExploreSlide);
-        slide.setAttribute('aria-hidden', slideIndex === currentExploreSlide ? 'false' : 'true');
+        const isActive = slideIndex === currentExploreSlide;
+        slide.classList.toggle('hidden', !isActive);
+        slide.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+        const video = slide.querySelector('video');
+        if (video) {
+          if (isActive) {
+            if (exploreVideoIsInView) playExploreVideo(video);
+            else {
+              video.pause();
+              video.muted = true;
+            }
+          } else {
+            video.pause();
+          }
+        }
       });
       dots.forEach((dot, dotIndex) => {
         const isActive = dotIndex === currentExploreSlide;
@@ -5535,8 +5569,70 @@
       document.getElementById('exploreSlideCount').textContent = `${currentExploreSlide + 1} / ${slides.length}`;
     }
 
+    function playExploreVideo(video) {
+      if (video.ended) video.currentTime = 0;
+      video.muted = !exploreVideoSoundEnabled;
+      video.play().catch(error => {
+        if (error.name === 'NotAllowedError' && !video.muted) {
+          video.muted = true;
+          video.play().catch(fallbackError => {
+            if (fallbackError.name !== 'AbortError') console.warn('Unable to autoplay the travel highlights video:', fallbackError);
+          });
+          return;
+        }
+        if (error.name !== 'AbortError') console.warn('Unable to autoplay the travel highlights video:', error);
+      });
+    }
+
+    function saveExploreVideoState() {
+      const video = document.querySelector('#exploreCarousel .explore-slide video');
+      try {
+        localStorage.setItem(EXPLORE_VIDEO_STATE_KEY, JSON.stringify({
+          active: currentExploreSlide === 9,
+          currentTime: video?.currentTime || 0,
+          soundEnabled: exploreVideoSoundEnabled
+        }));
+      } catch (error) {
+        console.warn('Unable to save travel video playback state.', error);
+      }
+    }
+
+    function suspendExploreVideo() {
+      const video = document.querySelector('#exploreCarousel .explore-slide video');
+      if (!video) return;
+      if (!video.muted) exploreVideoSoundEnabled = true;
+      exploreVideoIsInView = false;
+      video.pause();
+      video.muted = true;
+      saveExploreVideoState();
+    }
+
+    function resumeExploreVideo() {
+      const carousel = document.getElementById('exploreCarousel');
+      if (!carousel || document.visibilityState !== 'visible') return;
+      const bounds = carousel.getBoundingClientRect();
+      exploreVideoIsInView = bounds.bottom > 0 && bounds.top < window.innerHeight &&
+        bounds.right > 0 && bounds.left < window.innerWidth &&
+        Math.min(bounds.bottom, window.innerHeight) - Math.max(bounds.top, 0) >= Math.min(bounds.height, window.innerHeight) * 0.25;
+      const video = carousel.querySelector('.explore-slide video');
+      if (video && currentExploreSlide === 9 && exploreVideoIsInView) playExploreVideo(video);
+    }
+
     function moveExploreSlide(direction) {
       setExploreSlide(currentExploreSlide + direction);
+    }
+
+    function enableExploreVideoSound() {
+      const video = document.querySelector('.explore-slide:not(.hidden) video');
+      if (!video) return;
+      exploreVideoSoundEnabled = true;
+      video.muted = false;
+      video.play().catch(error => {
+        if (error.name !== 'AbortError') {
+          console.warn('Unable to play the travel highlights video with sound:', error);
+          showToast('Tap the video play control to enable sound.');
+        }
+      });
     }
 
     const ONBOARDING_STEPS = [
@@ -7742,8 +7838,53 @@
       if (travelDateInput.value && travelDateInput.value < today) travelDateInput.value = '';
       document.getElementById('globalExploreCarouselHost').appendChild(document.querySelector('.customer-hero'));
       setExploreSlide(currentExploreSlide);
+      document.querySelectorAll('.explore-slide video').forEach(video => {
+        const soundButton = video.closest('.explore-slide')?.querySelector('button[aria-label="Enable video sound"]');
+        video.addEventListener('loadedmetadata', () => {
+          if (exploreVideoResumeTime === null) return;
+          video.currentTime = Math.min(exploreVideoResumeTime, video.duration || exploreVideoResumeTime);
+          exploreVideoResumeTime = null;
+        }, { once: true });
+        video.addEventListener('volumechange', () => {
+          if (exploreVideoIsInView) exploreVideoSoundEnabled = !video.muted;
+          soundButton?.classList.toggle('hidden', !video.muted);
+          saveExploreVideoState();
+        });
+        video.addEventListener('ended', () => {
+          if (video.closest('.explore-slide')?.classList.contains('hidden')) return;
+          moveExploreSlide(1);
+        });
+      });
+      if ('IntersectionObserver' in window) {
+        const exploreVideoObserver = new IntersectionObserver(entries => {
+          const entry = entries[0];
+          exploreVideoIsInView = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.25);
+          const video = document.querySelector('#exploreCarousel .explore-slide video');
+          if (!video) return;
+          if (!exploreVideoIsInView) {
+            video.pause();
+            video.muted = true;
+          } else if (currentExploreSlide === 9) {
+            playExploreVideo(video);
+          }
+        }, { threshold: [0, 0.25] });
+        exploreVideoObserver.observe(document.getElementById('exploreCarousel'));
+      } else {
+        exploreVideoIsInView = true;
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') suspendExploreVideo();
+        else resumeExploreVideo();
+      });
+      window.addEventListener('pagehide', suspendExploreVideo);
+      window.addEventListener('pageshow', resumeExploreVideo);
+      setExploreSlide(currentExploreSlide);
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        window.setInterval(() => setExploreSlide(currentExploreSlide + 1), 6000);
+        window.setInterval(() => {
+          const activeVideo = document.querySelector('.explore-slide:not(.hidden) video');
+          if (activeVideo) return;
+          setExploreSlide(currentExploreSlide + 1);
+        }, 6000);
       }
       const exploreCarousel = document.getElementById('exploreCarousel');
       let touchStartX = null;

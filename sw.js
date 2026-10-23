@@ -37,7 +37,7 @@ self.addEventListener('notificationclick', event => {
   }));
 });
 self.addEventListener('fetch', event => {  const request = event.request;
-  if (request.method !== 'GET') return;
+  if (request.method !== 'GET' || request.headers.has('range')) return;
   const requestUrl = new URL(request.url);
   if (requestUrl.origin === self.location.origin && requestUrl.pathname.startsWith('/api/')) return;
   if (request.mode === 'navigate') {

@@ -213,8 +213,8 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     await fs.rm(dataDir, { recursive: true, force: true });
   });
 
-  async function request(route, { method = 'GET', body, cookie = '', csrf = '' } = {}) {
-    const headers = { Origin: baseUrl };
+  async function request(route, { method = 'GET', body, cookie = '', csrf = '', headers: requestHeaders = {} } = {}) {
+    const headers = { ...requestHeaders, Origin: baseUrl };
     if (cookie) headers.Cookie = cookie;
     if (csrf) headers['X-CSRF-Token'] = csrf;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -1547,6 +1547,14 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     assert.equal(carouselImage.headers.get('content-type'), 'image/jpeg');
     assert.ok((await carouselImage.arrayBuffer()).byteLength > 0);
   }
+  const travelVideoBytes = await fs.readFile(path.join(__dirname, '..', 'adss.mp4'));
+  const travelVideo = await request('/adss.mp4', { headers: { Range: 'bytes=0-31' } });
+  assert.equal(travelVideo.status, 206);
+  assert.equal(travelVideo.headers.get('content-type'), 'video/mp4');
+  assert.equal(travelVideo.headers.get('content-range'), `bytes 0-31/${travelVideoBytes.length}`);
+  assert.deepEqual(Buffer.from(await travelVideo.arrayBuffer()), travelVideoBytes.subarray(0, 32));
+  const invalidVideoRange = await request('/adss.mp4', { headers: { Range: 'bytes=999999999-' } });
+  assert.equal(invalidVideoRange.status, 416);
   for (const size of [16, 32, 48, 64, 128, 180, 192, 256, 512]) {
     const iconResponse = await request(`/safar_kaabe_logo_${size}x${size}.png`);
     assert.equal(iconResponse.status, 200, `logo icon ${size}x${size} should be served`);
@@ -1763,7 +1771,29 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /function renderAdditionalSearchMatches\(query\)/);
   assert.match(appMarkup, /booking\.ref, booking\.pnr, booking\.travelerName/);
   assert.match(appMarkup, /function openConversationFromSearch\(id\)/);
-  assert.equal((appMarkup.match(/class="explore-slide(?: hidden)?"/g) || []).length, 9);
+  assert.equal((appMarkup.match(/class="explore-slide(?: hidden)?"/g) || []).length, 10);
+  assert.equal((appMarkup.match(/aria-label="\d+ of 10:/g) || []).length, 10);
+  assert.doesNotMatch(appMarkup, /aria-label="\d+ of 9:/);
+  assert.match(appMarkup, /<video src="adss\.mp4" controls playsinline preload="none"/);
+  assert.match(appMarkup, /let exploreVideoIsInView = false;[\s\S]*?let exploreVideoSoundEnabled = savedExploreVideoState\.soundEnabled === true;/);
+  assert.match(appMarkup, /function playExploreVideo\(video\)/);
+  assert.match(appMarkup, /const EXPLORE_VIDEO_STATE_KEY = 'safar_kaabe_explore_video_state'/);
+  assert.match(appMarkup, /function saveExploreVideoState\(\)[\s\S]*?soundEnabled: exploreVideoSoundEnabled/);
+  assert.match(appMarkup, /function suspendExploreVideo\(\)[\s\S]*?exploreVideoIsInView = false;[\s\S]*?video\.pause\(\);[\s\S]*?video\.muted = true;[\s\S]*?saveExploreVideoState\(\);/);
+  assert.match(appMarkup, /function resumeExploreVideo\(\)[\s\S]*?playExploreVideo\(video\);/);
+  assert.match(appMarkup, /document\.addEventListener\('visibilitychange'[\s\S]*?window\.addEventListener\('pagehide', suspendExploreVideo\);[\s\S]*?window\.addEventListener\('pageshow', resumeExploreVideo\);/);
+  assert.match(appMarkup, /video\.currentTime = Math\.min\(exploreVideoResumeTime, video\.duration \|\| exploreVideoResumeTime\)/);
+  assert.match(appMarkup, /new IntersectionObserver\(entries => \{[\s\S]*?video\.pause\(\);[\s\S]*?video\.muted = true;[\s\S]*?playExploreVideo\(video\);/);
+  assert.match(appMarkup, /if \(activeVideo\) return;/);
+  assert.match(appMarkup, /if \(exploreVideoIsInView\) exploreVideoSoundEnabled = !video\.muted;/);
+  assert.match(appMarkup, /aria-label="Enable video sound"/);
+  assert.match(appMarkup, /function enableExploreVideoSound\(\)/);
+  assert.match(appMarkup, /soundButton\?\.classList\.toggle\('hidden', !video\.muted\)/);
+  assert.match(appMarkup, /error\.name === 'NotAllowedError' && !video\.muted[\s\S]*?video\.muted = true;[\s\S]*?video\.play\(\)/);
+  assert.match(appMarkup, /aria-label="Show travel video 10"/);
+  assert.match(appMarkup, /if \(video\.ended\) video\.currentTime = 0;/);
+  assert.match(appMarkup, /video\.addEventListener\('ended', \(\) => \{[\s\S]*?moveExploreSlide\(1\);/);
+  assert.doesNotMatch(appMarkup, /SAFAR KAABE travel highlights<\/span>/);
   assert.match(appMarkup, /<div id="mobileMenuPanel"[\s\S]*?id="mobileMenuRole"/);
   assert.doesNotMatch(appMarkup.match(/<div id="mobileMenuPanel"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || '', /<img\b/);
   assert.match(appMarkup, /async function openMessagingCenter/);
