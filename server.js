@@ -419,6 +419,14 @@ const schema = `
     attempts INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS native_push_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS native_push_tokens_user_idx ON native_push_tokens(user_id);
   CREATE INDEX IF NOT EXISTS trip_waitlist_user_idx ON trip_waitlist(user_id, created_at);
   CREATE INDEX IF NOT EXISTS login_challenges_user_idx ON login_challenges(user_id);
   CREATE INDEX IF NOT EXISTS chat_status_views_status_idx ON chat_status_views(status_id, viewed_at);
@@ -868,7 +876,8 @@ async function initializeDatabase() {
     await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
   }
 
-  const callColumns = [['caller_seen_at', 'TEXT'], ['callee_seen_at', 'TEXT'], ['caller_device', 'TEXT'], ['callee_device', 'TEXT']];
+  const callColumns = [['caller_seen_at', 'TEXT'], ['callee_seen_at', 'TEXT'], ['caller_device', 'TEXT'], ['callee_device', 'TEXT'],
+    ['ring_push_at', 'TEXT'], ['push_token', 'TEXT']];
   if (db.isPostgres) {
     for (const [column, definition] of callColumns) {
       await db.exec(`ALTER TABLE chat_calls ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
@@ -892,7 +901,7 @@ async function initializeDatabase() {
     }
   };
   await addMissingColumns('bookings', [['refund_status', 'TEXT'], ['refund_reference', 'TEXT'], ['refund_note', 'TEXT'], ['refunded_at', 'TEXT']]);
-  await addMissingColumns('users', [['login_code_enabled', 'INTEGER NOT NULL DEFAULT 0']]);
+  await addMissingColumns('users', [['login_code_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['theme_preference', 'TEXT']]);
 
   const preferenceColumns = [
     ['booking_alerts', 'INTEGER NOT NULL DEFAULT 1'],
@@ -980,7 +989,8 @@ const publicUser = user => ({
   avatarData: user.avatar_data || null,
   presenceStatus: user.presence_status || 'AVAILABLE',
   lastSeenAt: user.last_seen_at || null,
-  loginCodeEnabled: Number(user.login_code_enabled || 0) === 1
+  loginCodeEnabled: Number(user.login_code_enabled || 0) === 1,
+  themePreference: ['light', 'dark', 'system'].includes(user.theme_preference) ? user.theme_preference : null
 });
 
 const agencyRatingColumns = agencyIdExpression => `
@@ -1449,24 +1459,41 @@ function publishNotification(userId, notification) {
   if (clients.size === 0) notificationEventSubscribers.delete(userId);
 }
 
-async function deliverWebPush(userId, notification) {
-  if (!webPushConfigured) return;
+async function pushAllowed(userId, notification) {
   const preferences = await db.prepare('SELECT * FROM notification_preferences WHERE user_id = ?').get(userId);
-  if (preferences && Number(preferences.desktop_push_enabled) === 0) return;
-  if (!notificationPreferenceEnabled(preferences, notification.type) || isWithinQuietHours(preferences)) return;
+  if (preferences && Number(preferences.desktop_push_enabled) === 0) return null;
+  if (!notificationPreferenceEnabled(preferences, notification.type) || isWithinQuietHours(preferences)) return null;
   if (notification.conversationId && preferences) {
     const mutedIds = JSON.parse(preferences.muted_conversation_ids || '[]');
-    if (Array.isArray(mutedIds) && mutedIds.includes(notification.conversationId)) return;
+    if (Array.isArray(mutedIds) && mutedIds.includes(notification.conversationId)) return null;
   }
+  return { preferences };
+}
+
+function pushText(preferences, notification) {
+  const hidden = preferences && Number(preferences.lock_screen_previews) === 0;
+  return {
+    title: hidden ? 'SAFAR KAABE update' : notification.title,
+    body: hidden ? 'You have a new notification.' : notification.body
+  };
+}
+
+// extra.tag groups notifications (one per call); extra.data carries call details for the Answer/Decline buttons.
+async function deliverWebPush(userId, notification, extra = {}, { skipChecks = false } = {}) {
+  if (!webPushConfigured) return;
+  const allowed = skipChecks ? { preferences: null } : await pushAllowed(userId, notification);
+  if (!allowed) return;
   const subscriptions = await db.prepare('SELECT endpoint, subscription_json FROM push_subscriptions WHERE user_id = ?').all(userId);
   for (const subscription of subscriptions) {
     try {
       await webPush.sendNotification(JSON.parse(subscription.subscription_json), JSON.stringify({
-        title: preferences && Number(preferences.lock_screen_previews) === 0 ? 'SAFAR KAABE update' : notification.title,
-        body: preferences && Number(preferences.lock_screen_previews) === 0 ? 'You have a new notification.' : notification.body,
+        ...pushText(allowed.preferences, notification),
         url: notification.href || '/',
-        notificationId: notification.id
-      }));
+        notificationId: notification.id || null,
+        type: notification.type,
+        tag: extra.tag || null,
+        data: extra.data || null
+      }), { urgency: notification.type === 'CALL_INCOMING' ? 'high' : 'normal', TTL: notification.type === 'CALL_INCOMING' ? 60 : 86_400 });
     } catch (error) {
       if (error?.statusCode === 404 || error?.statusCode === 410) {
         await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(subscription.endpoint);
@@ -1475,6 +1502,89 @@ async function deliverWebPush(userId, notification) {
       }
     }
   }
+}
+
+// ---------- Native Android push (Firebase Cloud Messaging) ----------
+// Set FIREBASE_SERVICE_ACCOUNT to the service-account JSON (plain or base64) from the Firebase console.
+const fcmServiceAccount = (() => {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) return null;
+  try {
+    const text = raw.trim().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
+    const parsed = JSON.parse(text);
+    return parsed.client_email && parsed.private_key && parsed.project_id ? parsed : null;
+  } catch {
+    console.error('FIREBASE_SERVICE_ACCOUNT is not valid service-account JSON. Android call alerts are off.');
+    return null;
+  }
+})();
+let fcmAccess = null;
+
+async function fcmAccessToken() {
+  if (fcmAccess && fcmAccess.expiresAt > Date.now() + 60_000) return fcmAccess.token;
+  const now = Math.floor(Date.now() / 1000);
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({
+    iss: fcmServiceAccount.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600
+  })}`;
+  const signature = crypto.createSign('RSA-SHA256').update(unsigned).sign(fcmServiceAccount.private_key, 'base64url');
+  const response = await fetch(process.env.FCM_TOKEN_URL || 'https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${signature}` }),
+    signal: AbortSignal.timeout(8000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) throw new Error(`Firebase sign-in failed (${response.status})`);
+  fcmAccess = { token: payload.access_token, expiresAt: Date.now() + (Number(payload.expires_in) || 3600) * 1000 };
+  return fcmAccess.token;
+}
+
+async function sendNativePushData(userId, data, { ttlSeconds = 86_400 } = {}) {
+  if (!fcmServiceAccount) return;
+  const tokens = await db.prepare('SELECT token FROM native_push_tokens WHERE user_id = ?').all(userId);
+  if (!tokens.length) return;
+  const accessToken = await fcmAccessToken();
+  const stringData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined && value !== null).map(([key, value]) => [key, String(value)]));
+  for (const { token } of tokens) {
+    const response = await fetch(`${process.env.FCM_API_BASE || 'https://fcm.googleapis.com'}/v1/projects/${encodeURIComponent(fcmServiceAccount.project_id)}/messages:send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: { token, data: stringData, android: { priority: 'HIGH', ttl: `${ttlSeconds}s` } } }),
+      signal: AbortSignal.timeout(8000)
+    }).catch(error => ({ ok: false, status: 0, error }));
+    if (response.ok) continue;
+    const detail = response.json ? await response.json().catch(() => ({})) : {};
+    const errorCode = JSON.stringify(detail).match(/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/)?.[0];
+    if (response.status === 404 || errorCode === 'UNREGISTERED' || errorCode === 'NOT_FOUND') {
+      await db.prepare('DELETE FROM native_push_tokens WHERE token = ?').run(token);
+    } else {
+      console.warn(`Android push failed (${response.status || response.error?.message}).`);
+    }
+  }
+}
+
+async function deliverNativePush(userId, notification, extra = {}) {
+  if (!fcmServiceAccount) return;
+  const allowed = await pushAllowed(userId, notification);
+  if (!allowed) return;
+  await sendNativePushData(userId, {
+    type: notification.type, ...pushText(allowed.preferences, notification), url: notification.href || '/',
+    notificationId: notification.id, tag: extra.tag, ...(extra.data || {})
+  }, { ttlSeconds: notification.type === 'CALL_INCOMING' ? 60 : 86_400 });
+}
+
+// Stops the ringing on every device of the person being called (answered elsewhere, declined, cancelled or missed).
+async function pushCallEnded(call, reason) {
+  const title = reason === 'MISSED' ? 'Missed call' : reason === 'ANSWERED' ? 'Call answered' : 'Call ended';
+  const notification = { id: null, type: 'CALL_ENDED', title, body: reason === 'ANSWERED' ? 'You answered this call on another device.' : 'The call is no longer ringing.', href: `/?conversation=${encodeURIComponent(call.conversation_id)}` };
+  const extra = { tag: `call-${call.id}`, data: { callId: call.id, reason } };
+  await Promise.allSettled([
+    deliverWebPush(call.callee_id, notification, extra, { skipChecks: true }),
+    sendNativePushData(call.callee_id, { type: 'CALL_ENDED', callId: call.id, reason }, { ttlSeconds: 120 })
+  ]).then(results => results.filter(result => result.status === 'rejected')
+    .forEach(result => console.warn('Call-ended push failed:', result.reason?.message)));
 }
 
 async function createConversationMessageNotifications(conversation, sender, message) {
@@ -1506,10 +1616,14 @@ async function createConversationMessageNotifications(conversation, sender, mess
       notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
     if (inserted.changes === 1) created.push(notification);
   }
+  const deliveries = [];
   for (const notification of created) {
     publishNotification(notification.recipientUserId, notification);
-    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push message notification failed:', error.message));
+    deliveries.push(deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push message notification failed:', error.message)));
+    deliveries.push(deliverNativePush(notification.recipientUserId, notification).catch(error => console.warn('Android message notification failed:', error.message)));
   }
+  // Wait so the alerts are sent before a serverless request finishes.
+  await Promise.allSettled(deliveries);
 }
 
 async function createNotifications(items) {
@@ -1519,7 +1633,7 @@ async function createNotifications(items) {
       id: crypto.randomUUID(), recipientUserId: item.recipientUserId, agencyId: item.agencyId || null,
       bookingId: item.bookingId || null, conversationId: item.conversationId || null, type: item.type,
       title: String(item.title).slice(0, 160), body: String(item.body).slice(0, 500), href: item.href || null,
-      createdAt: item.createdAt || nowIso(), readAt: null, dedupeKey: item.dedupeKey
+      createdAt: item.createdAt || nowIso(), readAt: null, dedupeKey: item.dedupeKey, push: item.push || null
     };
     const inserted = await db.prepare(`
       INSERT INTO notifications (id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at)
@@ -1529,11 +1643,15 @@ async function createNotifications(items) {
       notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
     if (inserted.changes === 1) created.push(notification);
   }
-  for (const notification of created) {
+  const deliveries = [];
+  for (const { push, ...notification } of created) {
     publishNotification(notification.recipientUserId, notification);
-    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn(`Web push ${notification.type} notification failed:`, error.message));
+    deliveries.push(deliverWebPush(notification.recipientUserId, notification, push || {}).catch(error => console.warn(`Web push ${notification.type} notification failed:`, error.message)));
+    deliveries.push(deliverNativePush(notification.recipientUserId, notification, push || {}).catch(error => console.warn(`Android push ${notification.type} notification failed:`, error.message)));
   }
-  return created;
+  // Wait so the alerts reach the phone before a serverless request finishes.
+  await Promise.allSettled(deliveries);
+  return created.map(({ push, ...notification }) => notification);
 }
 
 async function agencyStaffIds(agencyId) {
@@ -1796,7 +1914,10 @@ async function createTicketReadyNotification(booking, document) {
     notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
   if (inserted.changes === 1) {
     publishNotification(notification.recipientUserId, notification);
-    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Ticket notification failed:', error.message));
+    await Promise.allSettled([
+      deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Ticket notification failed:', error.message)),
+      deliverNativePush(notification.recipientUserId, notification).catch(error => console.warn('Android ticket notification failed:', error.message))
+    ]);
   }
 }
 
@@ -2277,6 +2398,22 @@ async function handleApi(request, response, url) {
 
   if (method === 'GET' && pathname === '/api/catalog') await runBackgroundSweeps();
 
+  // "Decline" button on a call notification. Works without a session: the secret token was only sent to the callee's devices.
+  const pushDeclineMatch = pathname.match(/^\/api\/calls\/([0-9a-f-]+)\/push-decline$/i);
+  if (method === 'POST' && pushDeclineMatch) {
+    const body = await readJson(request);
+    const call = await db.prepare('SELECT * FROM chat_calls WHERE id = ?').get(pushDeclineMatch[1]);
+    if (!call || !call.push_token || typeof body.token !== 'string' || !safeEqual(body.token, call.push_token)) {
+      sendJson(response, 404, { error: 'Call not found.' });
+      return;
+    }
+    const declined = await db.prepare("UPDATE chat_calls SET status = 'REJECTED', ended_at = ? WHERE id = ? AND status = 'RINGING' RETURNING id")
+      .get(nowIso(), call.id);
+    if (declined) await pushCallEnded(call, 'DECLINED');
+    sendJson(response, 200, { ok: true, declined: Boolean(declined) });
+    return;
+  }
+
   // Daily job (Vercel Cron). Safe to run more than once: every task skips work already done.
   if (method === 'GET' && pathname === '/api/cron/daily') {
     const secret = process.env.CRON_SECRET;
@@ -2741,6 +2878,19 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (method === 'PATCH' && pathname === '/api/auth/theme') {
+    if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
+    if (!authorizeMutation(request, response, session)) return;
+    const body = await readJson(request);
+    if (!['light', 'dark', 'system'].includes(body.theme)) {
+      sendJson(response, 400, { error: 'Choose Light, Dark or Automatic.' });
+      return;
+    }
+    await db.prepare('UPDATE users SET theme_preference = ? WHERE id = ?').run(body.theme, user.id);
+    sendJson(response, 200, { user: publicUser({ ...user, theme_preference: body.theme }) });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/auth/session') {
     sendJson(response, 200, { user: user ? publicUser(user) : null, loginCodesAvailable: loginCodesAvailable() });
     return;
@@ -2980,6 +3130,24 @@ async function handleApi(request, response, url) {
         ON CONFLICT (endpoint) DO UPDATE SET user_id = excluded.user_id, subscription_json = excluded.subscription_json, updated_at = excluded.updated_at
       `).run(crypto.randomUUID(), user.id, subscription.endpoint, JSON.stringify(subscription), timestamp, timestamp);
       sendJson(response, 201, { ok: true });
+      return;
+    }
+
+    if (pathname === '/api/push/native-tokens' && ['POST', 'DELETE'].includes(method)) {
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      const token = requireString(body.token, 'Device token', 4096);
+      if (method === 'DELETE') {
+        await db.prepare('DELETE FROM native_push_tokens WHERE token = ? AND user_id = ?').run(token, user.id);
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      const platform = body.platform === 'ios' ? 'ios' : 'android';
+      const stamp = nowIso();
+      await db.prepare(`INSERT INTO native_push_tokens (token, user_id, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform, updated_at = excluded.updated_at`)
+        .run(token, user.id, platform, stamp, stamp);
+      sendJson(response, 200, { ok: true, configured: Boolean(fcmServiceAccount) });
       return;
     }
 
@@ -3803,8 +3971,9 @@ async function handleApi(request, response, url) {
       const callId = crypto.randomUUID();
       const createdAt = nowIso();
       const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : null;
-      await db.prepare(`INSERT INTO chat_calls (id, conversation_id, caller_id, callee_id, call_type, status, created_at, caller_device)
-        VALUES (?, ?, ?, ?, ?, 'RINGING', ?, ?)`).run(callId, conversation.id, user.id, callee.id, callType, createdAt, deviceId);
+      const declineToken = crypto.randomBytes(18).toString('base64url');
+      await db.prepare(`INSERT INTO chat_calls (id, conversation_id, caller_id, callee_id, call_type, status, created_at, caller_device, push_token, ring_push_at)
+        VALUES (?, ?, ?, ?, ?, 'RINGING', ?, ?, ?, ?)`).run(callId, conversation.id, user.id, callee.id, callType, createdAt, deviceId, declineToken, createdAt);
       // Two people may call the same person at the same moment. Both inserts are now visible, so keep only
       // the earliest call and withdraw this one if another call got there first.
       const competing = (await db.prepare(busyQuery).all(user.id, callee.id, user.id, callee.id))
@@ -3818,7 +3987,8 @@ async function handleApi(request, response, url) {
         await createNotifications([{
           recipientUserId: callee.id, agencyId: conversation.agency_id, conversationId: conversation.id, type: 'CALL_INCOMING',
           title: `Incoming ${callType === 'VIDEO' ? 'video' : 'voice'} call`, body: `${user.name} is calling you. Open SAFAR KAABE to answer.`,
-          href: `/?conversation=${encodeURIComponent(conversation.id)}`, createdAt, dedupeKey: `CALL_INCOMING:${callId}`
+          href: `/?conversation=${encodeURIComponent(conversation.id)}`, createdAt, dedupeKey: `CALL_INCOMING:${callId}`,
+          push: { tag: `call-${callId}`, data: { callId, conversationId: conversation.id, callType, callerName: user.name, declineToken } }
         }]);
       } catch (error) {
         console.error('Incoming call notification could not be created:', error.message);
@@ -3862,6 +4032,7 @@ async function handleApi(request, response, url) {
         RETURNING id, conversation_id AS "conversationId", caller_id AS "callerId", callee_id AS "calleeId", call_type AS "callType"`)
         .all(now, cutoff);
       for (const call of missed) {
+        await pushCallEnded({ id: call.id, conversation_id: call.conversationId, callee_id: call.calleeId }, 'MISSED');
         try {
           const caller = await db.prepare('SELECT name FROM users WHERE id = ?').get(call.callerId);
           await createNotifications([{
@@ -3876,6 +4047,23 @@ async function handleApi(request, response, url) {
       }
       // A call whose participant closed the app without hanging up would block both people
       // from new calls. End connected calls when either side has not checked in for 90 seconds.
+      // While the caller waits, ring the other person's browser again every few seconds (a web notification
+      // only sounds once). The Android app rings continuously by itself.
+      if (webPushConfigured) {
+        const ringAgainBefore = new Date(Date.now() - 6_000).toISOString();
+        const ringing = await db.prepare(`UPDATE chat_calls SET ring_push_at = ? WHERE caller_id = ? AND status = 'RINGING'
+            AND created_at >= ? AND (ring_push_at IS NULL OR ring_push_at < ?)
+          RETURNING id, conversation_id AS "conversationId", callee_id AS "calleeId", call_type AS "callType", push_token AS "pushToken"`)
+          .all(now, user.id, cutoff, ringAgainBefore);
+        for (const call of ringing) {
+          await deliverWebPush(call.calleeId, {
+            id: null, type: 'CALL_INCOMING', conversationId: call.conversationId,
+            title: `Incoming ${call.callType === 'VIDEO' ? 'video' : 'voice'} call`, body: `${user.name} is calling you. Open SAFAR KAABE to answer.`,
+            href: `/?conversation=${encodeURIComponent(call.conversationId)}`
+          }, { tag: `call-${call.id}`, data: { callId: call.id, conversationId: call.conversationId, callType: call.callType, callerName: user.name, declineToken: call.pushToken } })
+            .catch(error => console.warn('Repeat call ring failed:', error.message));
+        }
+      }
       const abandonedBefore = new Date(Date.now() - 90_000).toISOString();
       await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ${callLastSeenSql} WHERE status = 'ACCEPTED'
         AND (COALESCE(caller_seen_at, accepted_at, created_at) < ? OR COALESCE(callee_seen_at, accepted_at, created_at) < ?)`)
@@ -3950,13 +4138,16 @@ async function handleApi(request, response, url) {
         const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : null;
         await db.prepare("UPDATE chat_calls SET status = 'ACCEPTED', accepted_at = ?, callee_device = ? WHERE id = ? AND status = 'RINGING'")
           .run(nowIso(), deviceId, call.id);
+        await pushCallEnded(call, 'ANSWERED');
       } else if (action === 'REJECT' && call.callee_id === user.id && call.status === 'RINGING') {
         await db.prepare("UPDATE chat_calls SET status = 'REJECTED', ended_at = ? WHERE id = ? AND status = 'RINGING'").run(nowIso(), call.id);
+        await pushCallEnded(call, 'DECLINED');
       } else if (action === 'END' && call.status === 'RINGING') {
         // Hanging up before an answer: for the caller it is a missed call for the other person; for the callee it is a decline.
         const endedStatus = call.caller_id === user.id ? 'MISSED' : 'REJECTED';
         const ended = await db.prepare(`UPDATE chat_calls SET status = ?, ended_at = ? WHERE id = ? AND status = 'RINGING'
           RETURNING id`).get(endedStatus, nowIso(), call.id);
+        if (ended) await pushCallEnded(call, endedStatus === 'MISSED' ? 'MISSED' : 'DECLINED');
         if (ended && endedStatus === 'MISSED') {
           try {
             await createNotifications([{
@@ -5229,10 +5420,13 @@ async function handleApi(request, response, url) {
         publishCatalogChange('availability');
         throw error;
       }
+      const bookingDeliveries = [];
       for (const notification of bookingNotifications) {
         publishNotification(notification.recipientUserId, notification);
-        deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push notification failed:', error.message));
+        bookingDeliveries.push(deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push notification failed:', error.message)));
+        bookingDeliveries.push(deliverNativePush(notification.recipientUserId, notification).catch(error => console.warn('Android push notification failed:', error.message)));
       }
+      await Promise.allSettled(bookingDeliveries);
       await audit(user?.id || null, paymentStart ? 'WAAFI_CHECKOUT_STARTED' : 'BOOKING_REQUESTED', `${booking.reference} (${booking.agencyId})`);
       if (user?.role === 'CLIENT') await db.prepare('DELETE FROM trip_waitlist WHERE offer_id = ? AND user_id = ?').run(offer.id, user.id);
       publishCatalogChange('availability');

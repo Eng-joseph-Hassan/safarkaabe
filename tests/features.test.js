@@ -42,6 +42,27 @@ test('reviews, payment notifications, status audiences and saved offers', async 
   });
   await new Promise(resolve => waafiServer.listen(0, '127.0.0.1', resolve));
 
+  // Fake Firebase: records the Android push messages the server sends.
+  const fcmMessages = [];
+  const fcmServer = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    if (request.url === '/token') {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ access_token: 'fake-access-token', expires_in: 3600 }));
+      return;
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (body.message.token === 'dead-device-token') {
+      response.writeHead(404, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }));
+      return;
+    }
+    fcmMessages.push({ authorization: request.headers.authorization, path: request.url, ...body.message });
+    response.writeHead(200, { 'Content-Type': 'application/json' }).end('{"name":"projects/test/messages/1"}');
+  });
+  await new Promise(resolve => fcmServer.listen(0, '127.0.0.1', resolve));
+  const { privateKey } = require('node:crypto').generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const firebaseAccount = JSON.stringify({ project_id: 'safar-test', client_email: 'push@safar-test.iam.example', private_key: privateKey });
+
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   let serverErrors = '';
@@ -51,7 +72,10 @@ test('reviews, payment notifications, status audiences and saved offers', async 
       ...process.env,
       NODE_ENV: 'test', HOST: '127.0.0.1', PORT: String(port), SAFAR_KAABE_DATA_DIR: dataDir,
       WAAFI_MERCHANT_UID: 'TESTMERCHANT', WAAFI_STORE_ID: '12345', WAAFI_HPP_KEY: '01234567890123456789012345678901',
-      WAAFI_TEST_ENDPOINT: `http://127.0.0.1:${waafiServer.address().port}/asm`
+      WAAFI_TEST_ENDPOINT: `http://127.0.0.1:${waafiServer.address().port}/asm`,
+      FIREBASE_SERVICE_ACCOUNT: Buffer.from(firebaseAccount).toString('base64'),
+      FCM_TOKEN_URL: `http://127.0.0.1:${fcmServer.address().port}/token`,
+      FCM_API_BASE: `http://127.0.0.1:${fcmServer.address().port}`
     },
     stdio: ['ignore', 'ignore', 'pipe']
   });
@@ -60,6 +84,7 @@ test('reviews, payment notifications, status audiences and saved offers', async 
     child.kill();
     await new Promise(resolve => child.once('exit', resolve));
     await new Promise(resolve => waafiServer.close(resolve));
+    await new Promise(resolve => fcmServer.close(resolve));
     await fs.rm(dataDir, { recursive: true, force: true });
   });
 
@@ -303,6 +328,38 @@ test('reviews, payment notifications, status audiences and saved offers', async 
   const calleeNotices = [...(await json('/api/notifications', { as: staff })).notifications];
   assert.ok(calleeNotices.some(item => item.type === 'CALL_MISSED' && item.body.includes('Amina')), 'the person called is told about the missed call');
 
+  // ---- Android call alerts (ring when the app is closed) ----
+  assert.equal((await request('/api/push/native-tokens', { method: 'POST', as: staff, body: {} })).status, 400);
+  assert.equal((await json('/api/push/native-tokens', { method: 'POST', as: staff, body: { token: 'staff-phone-token', platform: 'android' } })).configured, true);
+  await json('/api/push/native-tokens', { method: 'POST', as: staff, body: { token: 'dead-device-token', platform: 'android' } });
+  fcmMessages.length = 0;
+  const { call: pushCall } = await json(`/api/conversations/${agencyChat.conversation.id}/calls`, { method: 'POST', as: traveler, body: { callType: 'VIDEO' } }, 201);
+  const ring = fcmMessages.find(item => item.data.type === 'CALL_INCOMING' && item.data.callId === pushCall.id);
+  assert.ok(ring, 'the agency phone gets a ringing call alert');
+  assert.equal(ring.token, 'staff-phone-token');
+  assert.equal(ring.android.priority, 'HIGH');
+  assert.equal(ring.android.ttl, '60s', 'a call alert expires once the call stops ringing');
+  assert.equal(ring.data.callerName, 'Amina Hassan Ali');
+  assert.equal(ring.data.callType, 'VIDEO');
+  assert.equal(ring.authorization, 'Bearer fake-access-token');
+  assert.match(ring.path, /^\/v1\/projects\/safar-test\/messages:send$/);
+  assert.equal((await request(`/api/calls/${pushCall.id}/push-decline`, { method: 'POST', body: { token: 'wrong-token' } })).status, 404);
+  assert.equal((await json(`/api/calls/${pushCall.id}/push-decline`, { method: 'POST', body: { token: ring.data.declineToken } })).declined, true,
+    'Decline on the notification works without opening the app');
+  assert.equal((await json('/api/calls/history', { as: traveler })).calls.find(item => item.id === pushCall.id).status, 'REJECTED');
+  assert.ok(fcmMessages.some(item => item.data.type === 'CALL_ENDED' && item.data.callId === pushCall.id && item.data.reason === 'DECLINED'),
+    'the ringing stops on every agency phone');
+  const { call: answeredCall } = await json(`/api/conversations/${agencyChat.conversation.id}/calls`, { method: 'POST', as: traveler, body: { callType: 'AUDIO' } }, 201);
+  await json(`/api/calls/${answeredCall.id}`, { method: 'PATCH', as: staff, body: { action: 'ACCEPT', deviceId: 'laptop' } });
+  assert.ok(fcmMessages.some(item => item.data.type === 'CALL_ENDED' && item.data.callId === answeredCall.id && item.data.reason === 'ANSWERED'),
+    'answering on one device stops the other devices ringing');
+  await json(`/api/calls/${answeredCall.id}`, { method: 'PATCH', as: traveler, body: { action: 'END' } });
+  fcmMessages.length = 0;
+  await json(`/api/conversations/${agencyChat.conversation.id}/messages`, { method: 'POST', as: traveler, body: { message: 'Are you there?' } }, 201);
+  for (let attempt = 0; attempt < 20 && !fcmMessages.some(item => item.data.type === 'MESSAGE'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.ok(fcmMessages.some(item => item.data.type === 'MESSAGE' && item.data.title && item.data.url), 'new messages also reach the phone');
+  await json('/api/push/native-tokens', { method: 'DELETE', as: staff, body: { token: 'staff-phone-token' } });
+
   // ---- Blocking applies to the whole agency, and ends live calls ----
   await json('/api/agency/staff', { method: 'POST', as: staff, body: { name: 'Second Agent', email: 'agent2@bay.test', password: 'long-enough-agent-password' } }, 201);
   const colleague = session(await request('/api/auth/login', { method: 'POST', body: { email: 'agent2@bay.test', password: 'long-enough-agent-password' } }));
@@ -396,6 +453,12 @@ test('reviews, payment notifications, status audiences and saved offers', async 
   assert.equal(csvText.includes('Bay Travel'), true);
   const adminReport = await json('/api/reports/sales', { as: admin });
   assert.ok(adminReport.totals.requests >= report.totals.requests, 'admins see all agencies');
+
+  // ---- Appearance choice is saved to the account ----
+  assert.equal((await request('/api/auth/theme', { method: 'PATCH', as: traveler, body: { theme: 'purple' } })).status, 400);
+  assert.equal((await json('/api/auth/theme', { method: 'PATCH', as: traveler, body: { theme: 'light' } })).user.themePreference, 'light');
+  assert.equal((await json('/api/auth/session', { as: traveler })).user.themePreference, 'light', 'the colour choice follows the user to other devices');
+  assert.equal((await request('/api/auth/theme', { method: 'PATCH', body: { theme: 'dark' } })).status, 401);
 
   // ---- Sign-in code setting needs email to be configured ----
   assert.equal((await request('/api/auth/login-code', { method: 'PATCH', as: staff, body: { enabled: true, password: 'long-enough-agency-password' } })).status, 503,

@@ -8,6 +8,35 @@
   <meta name="description" content="Book flights, stays, transfers, tours and packages with Baidoa travel agencies." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <script>
+    // Apply the saved Light / Dark / Automatic choice before the page paints, so it never flashes the wrong colours.
+    (function () {
+      var choice = 'dark';
+      try { choice = window.localStorage.getItem('sk_theme') || 'dark'; } catch (error) {}
+      window.applyThemeChoice = function (value) {
+        var selected = ['light', 'dark', 'system'].indexOf(value) >= 0 ? value : 'dark';
+        var prefersLight = false;
+        try { prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches; } catch (error) {}
+        var effective = selected === 'system' ? (prefersLight ? 'light' : 'dark') : selected;
+        var root = document.documentElement;
+        root.setAttribute('data-theme', effective);
+        root.classList.toggle('dark', effective === 'dark');
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', effective === 'light' ? '#f3f5fa' : '#05070B');
+        window.currentThemeChoice = selected;
+        return effective;
+      };
+      window.applyThemeChoice(choice);
+      try {
+        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
+          if (window.currentThemeChoice === 'system') {
+            window.applyThemeChoice('system');
+            if (typeof window.syncThemeControls === 'function') window.syncThemeControls();
+          }
+        });
+      } catch (error) {}
+    })();
+  </script>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="1024x1024" href="logo-mark.png?v=1.8" />
   <link rel="icon" type="image/png" sizes="32x32" href="safar_kaabe_logo_32x32.png?v=1.8" />
@@ -1171,7 +1200,149 @@
     }
     .onboarding-next { border: 1px solid #C909E6; background: transparent; color: #C909E6; box-shadow: none; }
     #messagesPage #conversationMessages > div.self-end > div { background: rgba(255,255,255,.035) !important; }
-  </style>
+      /* ================= Light theme =================
+       The app is designed dark. When the user picks Light (html[data-theme="light"]),
+       these rules remap the dark surfaces and light text to a light palette. */
+    html[data-theme="light"] { color-scheme: light; }
+    html[data-theme="light"] body { background-color: #f3f5fa; color: #0f172a; }
+    html[data-theme="light"] .glass-sidebar { background: rgba(255, 255, 255, .97); border-right-color: rgba(15, 23, 42, .08); }
+    html[data-theme="light"] .glass-panel { background: rgba(255, 255, 255, .95); border-color: rgba(15, 23, 42, .09); box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+    html[data-theme="light"] .obsidian-card { background: #fff; border-color: rgba(15, 23, 42, .1); }
+    html[data-theme="light"] .obsidian-card-active { background: linear-gradient(145deg, rgba(8, 45, 191, .08) 0%, #fff 100%); }
+    html[data-theme="light"] .obsidian-input,
+    html[data-theme="light"] .auth-input { background: #fff; color: #0f172a; border-color: rgba(15, 23, 42, .18); }
+    html[data-theme="light"] .auth-input:focus { background: #fff; }
+    html[data-theme="light"] .obsidian-input::placeholder,
+    html[data-theme="light"] .auth-input::placeholder,
+    html[data-theme="light"] #globalSearchInput::placeholder { color: #94a3b8; }
+    html[data-theme="light"] select option { background: #fff; color: #0f172a; }
+    html[data-theme="light"] ::-webkit-scrollbar-track { background: #eef1f6; }
+    html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; }
+    html[data-theme="light"] .app-loading-indicator { background: rgba(255, 255, 255, .98); color: #a000c4; }
+    html[data-theme="light"] #authGate { background: #eef1f7; }
+    html[data-theme="light"] .auth-card { background: linear-gradient(155deg, #fff, #f7f8fc); border-color: rgba(15, 23, 42, .1); box-shadow: 0 28px 90px rgba(15, 23, 42, .14); }
+    html[data-theme="light"] .auth-mode-button { background: rgba(15, 23, 42, .03); color: #475569; border-color: rgba(15, 23, 42, .12); }
+    html[data-theme="light"] .auth-mode-button.auth-mode-active,
+    html[data-theme="light"] .brand-active { background: rgba(8, 45, 191, .1); color: #082dbf; border-color: rgba(8, 45, 191, .4); }
+    html[data-theme="light"] .brand-nav-active { color: #082dbf; }
+    html[data-theme="light"] .auth-success { color: #86059a; }
+    html[data-theme="light"] .password-visibility-toggle:hover { background: rgba(15, 23, 42, .06); color: #0f172a; }
+
+    /* Text colours */
+    html[data-theme="light"] .text-white,
+    html[data-theme="light"] .hover\:text-white:hover { color: #0f172a; }
+    html[data-theme="light"] .text-white\/80 { color: rgba(15, 23, 42, .8); }
+    html[data-theme="light"] .text-slate-100,
+    html[data-theme="light"] .text-slate-200 { color: #1e293b; }
+    html[data-theme="light"] .text-slate-300 { color: #334155; }
+    html[data-theme="light"] .text-slate-400 { color: #4b5a70; }
+    html[data-theme="light"] .text-slate-500,
+    html[data-theme="light"] .text-slate-600 { color: #64748b; }
+    html[data-theme="light"] .text-blue-100,
+    html[data-theme="light"] .text-blue-200,
+    html[data-theme="light"] .text-blue-300 { color: #1d4ed8; }
+    html[data-theme="light"] .text-blue-400 { color: #1e5ae0; }
+    html[data-theme="light"] :is(.text-sky-100, .text-sky-200, .text-sky-300, .text-sky-400) { color: #0369a1; }
+    html[data-theme="light"] :is(.text-rose-200, .text-rose-300, .text-rose-400, .hover\:text-rose-200:hover, .hover\:text-rose-300:hover) { color: #be123c; }
+    html[data-theme="light"] :is(.text-amber-100, .text-amber-200, .text-amber-300, .text-amber-400) { color: #a15c07; }
+    html[data-theme="light"] :is(.text-fuchsia-200, .text-fuchsia-300, .text-fuchsia-400, .hover\:text-fuchsia-200:hover) { color: #a21caf; }
+    html[data-theme="light"] .text-violet-300 { color: #6d28d9; }
+    html[data-theme="light"] .text-\[\#E27BF5\] { color: #a000c4; }
+
+    /* Keep white text on solid coloured buttons, badges and photo overlays */
+    html[data-theme="light"] :is(.bg-\[\#C909E6\], .bg-\[\#a000c4\], .bg-blue-400, .bg-blue-500, .bg-blue-600, .bg-rose-400, .bg-rose-500, .bg-rose-600, .bg-slate-600,
+      .bg-gradient-to-r, .bg-gradient-to-l, .bg-gradient-to-b, .bg-gradient-to-t, .bg-gradient-to-br, .bg-gradient-to-tr,
+      .bg-black\/50, .bg-black\/55, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/75, .bg-black\/80, .bg-black\/85, .bg-\[\#071452\]\/75):not(.from-\[\#111c32\]):is(.text-white, .text-slate-100, .text-slate-200),
+    html[data-theme="light"] :is(.bg-\[\#C909E6\], .bg-\[\#a000c4\], .bg-blue-500, .bg-blue-600, .bg-rose-500, .bg-rose-600, .bg-gradient-to-r, .bg-gradient-to-br,
+      .bg-black\/55, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/75, .bg-black\/80, .bg-black\/85):not(.from-\[\#111c32\]) > :is(.text-white, .text-slate-100, .text-slate-200),
+    html[data-theme="light"] :is(.from-black\/85, .from-blue-950, .from-blue-800, .from-blue-700, .from-blue-600) :is(.text-white, .text-slate-100, .text-slate-200) { color: #fff; }
+
+    /* Translucent white tints and borders become translucent dark ones */
+    html[data-theme="light"] :is(.bg-white\/5, .bg-white\/\[\.02\], .bg-white\/\[\.025\], .bg-white\/\[0\.025\], .bg-white\/\[\.03\], .bg-white\/\[0\.03\], .bg-white\/\[\.035\], .bg-white\/\[\.04\], .bg-white\/\[0\.04\], .bg-white\/\[\.05\]) { background-color: rgba(15, 23, 42, .035); }
+    html[data-theme="light"] :is(.bg-white\/10, .bg-white\/15, .hover\:bg-white\/5:hover, .hover\:bg-white\/\[0\.04\]:hover, .hover\:bg-white\/\[0\.05\]:hover) { background-color: rgba(15, 23, 42, .06); }
+    html[data-theme="light"] :is(.hover\:bg-white\/10:hover, .hover\:bg-white\/15:hover, .hover\:bg-white\/20:hover) { background-color: rgba(15, 23, 42, .09); }
+    html[data-theme="light"] :is(.border-white\/5, .border-white\/10, .border-white\/15, .border-white\/20, .border-white\/\[\.05\], .border-white\/\[\.06\], .border-white\/\[0\.06\], .border-white\/\[\.07\], .border-white\/\[0\.07\],
+      .border-\[\#172329\], .border-\[\#111b21\], .border-\[\#111820\], .hover\:border-white\/25:hover) { border-color: rgba(15, 23, 42, .12); }
+    html[data-theme="light"] .divide-white\/10 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(15, 23, 42, .1); }
+    html[data-theme="light"] :is(.ring-white\/10, .ring-white\/20) { --tw-ring-color: rgba(15, 23, 42, .12); }
+
+    /* Dark card and panel surfaces become white or light grey */
+    html[data-theme="light"] :is(.bg-black\/25, .bg-black\/30, .bg-black\/40, .bg-slate-950\/40, .bg-\[\#111b21\], .bg-\[\#111b21\]\/95, .bg-\[\#101827\], .bg-\[\#080c14\],
+      .bg-\[\#0b141a\], .bg-\[\#101821\], .bg-\[\#101821\]\/95, .bg-\[\#05080a\]\/95, .bg-\[\#0D1322\], .bg-\[\#111827\], .bg-\[\#0a0e17\], .bg-\[\#090D16\], .bg-\[\#090D16\]\/95,
+      .bg-\[\#05070B\], .bg-\[\#070b14\], .bg-\[\#101c35\], .bg-\[\#20242f\], .bg-\[\#111\], .bg-\[\#172329\]) { background-color: #fff; }
+    html[data-theme="light"] :is(.bg-\[\#202c33\], .bg-\[\#26343b\]) { background-color: #f0f2f5; }
+    html[data-theme="light"] .hover\:bg-\[\#35474f\]:hover { background-color: #e2e8f0; }
+    html[data-theme="light"] .bg-gradient-to-br.from-\[\#111c32\] { background-image: none; background-color: #fff; }
+
+    /* Header, trip search and booking panel */
+    html[data-theme="light"] #appHeader { background: rgba(255, 255, 255, .97); border-color: rgba(15, 23, 42, .08); }
+    html[data-theme="light"] #travelerSearchFilters,
+    html[data-theme="light"] #bookingRequestPanel { background: #fff; border-color: rgba(15, 23, 42, .1); box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+    html[data-theme="light"] #travelerSearchFilters select,
+    html[data-theme="light"] #bookingRequestPanel select { background: #fff; color: #0f172a; border-color: rgba(15, 23, 42, .18); }
+    html[data-theme="light"] #travelerSearchFilters .travel-search-label { color: #1e293b; }
+    html[data-theme="light"] #travelerSearchFilters .travel-search-help { color: #64748b; }
+    html[data-theme="light"] #bookingRequestPanel #selectedOfferBox,
+    html[data-theme="light"] #bookingRequestPanel #financialBreakdownBox { background: #f6f8fb; border-color: rgba(15, 23, 42, .1); }
+    html[data-theme="light"] #catalogContainer .travel-offer-card,
+    html[data-theme="light"] #popularRoutesSection > div:last-child > button { background: #fff !important; border-color: rgba(15, 23, 42, .1); }
+    html[data-theme="light"] #catalogContainer .travel-offer-card:hover { background: #fafbff !important; }
+    html[data-theme="light"] .explore-slide,
+    html[data-theme="light"] .explore-carousel-frame { background: #e2e8f0; }
+
+    /* Agency dashboard */
+    html[data-theme="light"] .agency-inventory-form,
+    html[data-theme="light"] .agency-inventory-card { background: #fff; border-color: rgba(15, 23, 42, .1); box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+    html[data-theme="light"] .agency-bookings-table thead { background: #f1f4f9 !important; }
+    html[data-theme="light"] .agency-bookings-table thead th { color: #475569; }
+    html[data-theme="light"] .agency-bookings-table tbody tr { background: #fff; }
+    html[data-theme="light"] .agency-bookings-table tbody tr:nth-child(even) { background: #f8fafc; }
+    html[data-theme="light"] .agency-bookings-table tbody tr:hover { background: #eef3ff; }
+    html[data-theme="light"] .agency-bookings-table tbody td { color: #0f172a; border-color: rgba(15, 23, 42, .08) !important; }
+    html[data-theme="light"] .agency-bookings-table tbody td:first-child { color: #1d4ed8; }
+    html[data-theme="light"] #view_AGENCY #agencyBookingsTableBody > tr { background: #fff; border-color: rgba(15, 23, 42, .1); }
+    html[data-theme="light"] .booking-more-button,
+    html[data-theme="light"] .agency-booking-icon-button { background: rgba(15, 23, 42, .05) !important; color: #334155 !important; }
+    html[data-theme="light"] .booking-undo-button { background: #fef3c7 !important; color: #92400e !important; }
+    html[data-theme="light"] .agency-booking-menu-panel { background: #fff; border-color: rgba(15, 23, 42, .12); }
+    html[data-theme="light"] .agency-booking-menu-item { color: #1e293b; }
+    html[data-theme="light"] .agency-booking-menu-item:hover { color: #0f172a; }
+
+    /* Chat */
+    html[data-theme="light"] #messagesPage,
+    html[data-theme="light"] #messagesPage .messages-card,
+    html[data-theme="light"] #messagesPage .messages-layout > section { background-color: #efeae2; }
+    html[data-theme="light"] #messagesPage #conversationMessages { background-color: #efeae2; background-image: none; }
+    html[data-theme="light"] #messagesPage .messages-page-header,
+    html[data-theme="light"] #messagesPage .messages-inbox-heading,
+    html[data-theme="light"] #messagesPage .messages-layout > aside { background: #fff; border-color: #e2e8f0; }
+    html[data-theme="light"] #messagesPage .messages-layout > section > header,
+    html[data-theme="light"] #messagesPage #replyMessageForm { background: #f0f2f5; border-color: #e2e8f0; }
+    html[data-theme="light"] #messagesPage #conversationList > .conversation-row > button:first-child:hover,
+    html[data-theme="light"] #messagesPage #conversationList > .conversation-row > button:first-child[data-active="true"],
+    html[data-theme="light"] #messagesPage #conversationList > button.border-blue-500\/40 { background: #e9edef; }
+    html[data-theme="light"] #messagesPage .chat-hub-tab[aria-selected="true"] { color: #0f172a; }
+    html[data-theme="light"] .chat-message-peer .chat-message-bubble { background: #fff; border-color: rgba(15, 23, 42, .06); }
+    html[data-theme="light"] .chat-message-own .chat-message-bubble,
+    html[data-theme="light"] #messagesPage #conversationMessages > div.self-end > div { background: #f5d9fb !important; border-color: rgba(201, 9, 230, .25); }
+    html[data-theme="light"] .chat-message-bubble { box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+    html[data-theme="light"] #chatDesktopRail { background: #f0f2f5; }
+    html[data-theme="light"] #chatDesktopRail .chat-rail-button { color: #54656f; }
+    html[data-theme="light"] #chatDesktopRail .chat-rail-button[aria-current="page"] { background: #dfe5e7; color: #111b21; }
+    html[data-theme="light"] #messagesPage .messages-filter { background: #f0f2f5; border-color: #e2e8f0; color: #54656f; }
+    html[data-theme="light"] #messagesPage .messages-filter.messages-filter-active { background: #fbe6fe; border-color: #C909E6; color: #86059a; }
+    html[data-theme="light"] .messages-filter-active, html[data-theme="light"] #messagesPage .messages-filter[aria-pressed="true"] { color: #86059a; }
+    /* The dark photo banner stays dark in both themes, so its text stays light. */
+    html[data-theme="light"] .customer-hero .text-slate-300 { color: #cbd5e1; }
+    html[data-theme="light"] .customer-hero .text-slate-400 { color: #94a3b8; }
+    html[data-theme="light"] .customer-hero :is(.text-blue-300, .text-blue-200) { color: #93c5fd; }
+    html[data-theme="light"] #headerSearchBar,
+    html[data-theme="light"] #appHeader > #headerSearchBar { background: #f3f5fa; border-color: rgba(15, 23, 42, .14); }
+    html[data-theme="light"] #mobileMenuTrigger { background: #fff; color: #1d4ed8; }
+    html[data-theme="light"] #globalSearchInput { color: #0f172a; }
+    html[data-theme="light"] #agencyKpiGrid .bg-black\/50 { background: #fff; }
+    html[data-theme="light"] #agencyKpiGrid .bg-black\/50 .text-xl { color: #0f172a; }
+</style>
   <script>
     const capacitorPlatform = window.Capacitor && typeof window.Capacitor.getPlatform === 'function'
       ? window.Capacitor.getPlatform()
@@ -1253,6 +1424,7 @@
         <button onclick="closeMobileMenu()" class="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white" type="button" aria-label="Close app menu"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>
       <div class="grid grid-cols-2 gap-2">
+        <button id="mobileThemeButton" onclick="toggleQuickTheme()" class="col-span-2 rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200" type="button"><i id="mobileThemeIcon" class="fa-solid fa-sun mr-2 text-amber-300" aria-hidden="true"></i><span id="mobileThemeLabel">Light mode</span></button>
         <button onclick="mobileMenuNavigate('CUSTOMER')" data-portal="CUSTOMER" class="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-compass mr-2 text-blue-300"></i>Explore</button>
         <button onclick="openMyTripsModal(); closeMobileMenu()" class="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-suitcase-rolling mr-2 text-blue-300"></i>Bookings</button>
         <button id="mobileSavedOffersButton" onclick="openSavedOffersModal(); closeMobileMenu()" class="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-heart mr-2 text-fuchsia-300"></i>Saved trips</button>
@@ -1493,6 +1665,9 @@
           <button id="mobileHeaderNotificationsButton" onclick="toggleNotificationCenter(event)" class="relative h-14 w-14 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20" type="button" aria-label="Open notifications" title="Open notifications" aria-expanded="false" hidden>
             <i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
             <span id="mobileHeaderNotificationsBadge" class="hidden absolute -right-1 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-4 text-white"></span>
+          </button>
+          <button id="themeToggleButton" onclick="toggleQuickTheme()" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10 sm:h-9 sm:w-10" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+            <i id="themeToggleIcon" class="fa-solid fa-sun" aria-hidden="true"></i>
           </button>
           <button id="installAppButton" onclick="installApp()" class="hidden rounded-xl border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-[11px] font-bold text-blue-200 hover:bg-blue-500/25" type="button">
             <i class="fa-solid fa-download mr-1"></i><span id="installAppLabel" class="hidden sm:inline">Install app</span><span id="installAppMobileLabel" class="sm:hidden">Install</span>
@@ -2234,6 +2409,18 @@
             <div id="blockedContactsList" class="space-y-2"></div>
           </section>
 
+          <section class="max-w-3xl space-y-3 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5" aria-labelledby="themeSettingsTitle">
+            <div>
+              <h3 id="themeSettingsTitle" class="text-sm font-bold text-white">Appearance</h3>
+              <p class="mt-1 text-[11px] text-slate-400">Choose how SAFAR KAABE looks. Your choice is saved to your account and used on all your devices.</p>
+            </div>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="App colours">
+              <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs font-bold text-slate-200"><input type="radio" name="themeChoice" value="light" onchange="setThemeChoice(this.value)" class="accent-[#C909E6]" /><i class="fa-solid fa-sun text-amber-300" aria-hidden="true"></i>Light</label>
+              <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs font-bold text-slate-200"><input type="radio" name="themeChoice" value="dark" onchange="setThemeChoice(this.value)" class="accent-[#C909E6]" /><i class="fa-solid fa-moon text-blue-300" aria-hidden="true"></i>Dark</label>
+              <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs font-bold text-slate-200"><input type="radio" name="themeChoice" value="system" onchange="setThemeChoice(this.value)" class="accent-[#C909E6]" /><i class="fa-solid fa-circle-half-stroke text-fuchsia-300" aria-hidden="true"></i>Automatic <span class="font-normal text-slate-400">(same as phone)</span></label>
+            </div>
+          </section>
+
           <section class="max-w-3xl space-y-3 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5" aria-labelledby="loginCodeSettingsTitle">
             <div>
               <h3 id="loginCodeSettingsTitle" class="text-sm font-bold text-white">Sign-in code by email</h3>
@@ -2617,6 +2804,16 @@
       <div class="border-b border-white/10 px-4 py-3"><label for="chatStatusViewsAudience" class="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Who can see this update</label><select id="chatStatusViewsAudience" onchange="changeViewedChatStatusAudience(this.value)" class="obsidian-input mt-1 w-full rounded-xl px-3 py-2 text-xs"><option value="EVERYONE">Everyone signed in</option><option value="CONTACTS">My contacts only — people I have chatted with</option></select></div>
       <div id="chatStatusViewsList" class="max-h-[55dvh] space-y-2 overflow-y-auto p-4"></div>
     </section>
+  </div>
+  <div id="callAlertsBanner" class="hidden fixed bottom-24 left-1/2 z-[65] w-[min(92vw,26rem)] -translate-x-1/2 rounded-2xl border border-[#C909E6]/40 bg-[#111b21] p-4 text-xs text-white shadow-2xl lg:bottom-6" role="dialog" aria-labelledby="callAlertsTitle">
+    <div class="flex gap-3">
+      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#C909E6]/15 text-[#E27BF5]"><i class="fa-solid fa-phone-volume" aria-hidden="true"></i></span>
+      <div class="min-w-0">
+        <h3 id="callAlertsTitle" class="font-bold text-white">Turn on call alerts</h3>
+        <p class="mt-1 text-[11px] text-slate-400">Your phone will ring for SAFAR KAABE calls, and show new messages, even when the app is closed or the screen is locked.</p>
+        <div class="mt-3 flex gap-2"><button type="button" onclick="enableCallAlerts()" class="rounded-xl bg-[#C909E6] px-4 py-2 font-bold text-white">Turn on</button><button type="button" onclick="dismissCallAlerts()" class="rounded-xl border border-white/10 px-4 py-2 font-bold text-slate-300">Not now</button></div>
+      </div>
+    </div>
   </div>
   <div id="loginCodeModal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="loginCodeTitle">
     <form onsubmit="submitLoginCode(event)" class="glass-panel w-full max-w-sm space-y-4 rounded-3xl border border-white/15 p-6 shadow-2xl">
@@ -3420,6 +3617,7 @@
 
     async function startAuthenticatedApp(user) {
       currentUser = user;
+      applyAccountTheme(user);
       document.documentElement.classList.add('android-launch-hidden');
       try {
         await refreshServerState();
@@ -3427,6 +3625,7 @@
         startCallPolling();
         startCustomerOfferRefresh();
         document.getElementById('authGate').classList.add('hidden');
+        ensureDevicePush().catch(error => console.warn('Call alerts could not be set up.', error));
         if (pendingDeepLink) {
           const link = pendingDeepLink;
           pendingDeepLink = null;
@@ -3441,6 +3640,10 @@
     async function signOut() {
       try {
         if (activeCall) await endCurrentCall();
+        if (nativePushToken) {
+          await apiRequest('/api/push/native-tokens', { method: 'DELETE', body: { token: nativePushToken } }).catch(() => {});
+          nativePushToken = null;
+        }
         await apiRequest('/api/auth/logout', { method: 'POST' });
         await startGuestApp();
       } catch (error) {
@@ -4083,16 +4286,12 @@
     }
 
     async function enableWebPush() {
+      if (nativeCallPushPlugin()) { await ensureDevicePush(); showToast('Call and message alerts are on for this phone.'); return; }
       if (!('Notification' in window)) { showToast('This device does not support browser notifications.'); return; }
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') { showToast('Notification permission was not granted.'); return; }
       try {
-        const keyResult = await apiRequest('/api/push/public-key');
-        if (!keyResult.configured) { showToast('In-app notifications are active. Device push is not configured on this server yet.'); return; }
-        const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(keyResult.publicKey) });
-        await apiRequest('/api/push/subscriptions', { method: 'POST', body: { subscription: subscription.toJSON() } });
-        showToast('Device notifications enabled.');
+        if (await subscribeWebPush()) showToast('Call and message alerts are on. Calls will ring on this device even when SAFAR KAABE is closed.');
       } catch (error) { showToast(`Device notifications could not be enabled: ${error.message}`); }
     }
 
@@ -4699,6 +4898,46 @@
       } catch (error) { showToast(error.message); }
     }
 
+    // ---------- Appearance (light / dark / automatic) ----------
+    function syncThemeControls() {
+      const choice = window.currentThemeChoice || 'dark';
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      document.querySelectorAll('input[name="themeChoice"]').forEach(input => { input.checked = input.value === choice; });
+      const label = light ? 'Switch to dark mode' : 'Switch to light mode';
+      const button = document.getElementById('themeToggleButton');
+      if (button) { button.setAttribute('aria-label', label); button.title = label; }
+      const icon = document.getElementById('themeToggleIcon');
+      if (icon) icon.className = `fa-solid ${light ? 'fa-moon' : 'fa-sun'}`;
+      const mobileIcon = document.getElementById('mobileThemeIcon');
+      if (mobileIcon) mobileIcon.className = `fa-solid ${light ? 'fa-moon text-blue-300' : 'fa-sun text-amber-300'} mr-2`;
+      const mobileLabel = document.getElementById('mobileThemeLabel');
+      if (mobileLabel) mobileLabel.textContent = light ? 'Dark mode' : 'Light mode';
+    }
+    window.syncThemeControls = syncThemeControls;
+    document.addEventListener('DOMContentLoaded', () => syncThemeControls());
+
+    function setThemeChoice(choice, { save = true } = {}) {
+      window.applyThemeChoice(choice);
+      try { window.localStorage.setItem('sk_theme', window.currentThemeChoice); } catch {}
+      syncThemeControls();
+      if (save && currentUser) {
+        apiRequest('/api/auth/theme', { method: 'PATCH', body: { theme: window.currentThemeChoice } })
+          .then(({ user }) => { if (user && currentUser) currentUser.themePreference = user.themePreference; })
+          .catch(error => console.warn('The colour choice could not be saved to the account.', error));
+      }
+    }
+
+    function toggleQuickTheme() {
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      setThemeChoice(light ? 'dark' : 'light');
+    }
+
+    // Use the colour choice saved on the account when someone signs in on a new device.
+    function applyAccountTheme(user) {
+      if (user?.themePreference && user.themePreference !== window.currentThemeChoice) setThemeChoice(user.themePreference, { save: false });
+      else syncThemeControls();
+    }
+
     // ---------- Refunds ----------
     function refundBadge(booking, travelerView = false) {
       if (booking?.refundStatus === 'NEEDED') {
@@ -4932,13 +5171,88 @@
       } catch (error) { showToast(error.message); }
     }
 
+    // Opened from a call notification: show the ringing call, and answer it if "Answer" was tapped.
+    async function openRingingCall(callId, answer) {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await syncActiveCalls();
+        if (activeCall?.id === callId) return;
+        if (incomingCall?.id === callId) {
+          if (answer) await acceptIncomingCall();
+          return;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 600));
+      }
+      showToast('This call has already ended.');
+    }
+
+    // ---------- Call and message alerts when the app is closed ----------
+    let nativePushToken = null;
+    function nativeCallPushPlugin() {
+      const capacitor = window.Capacitor;
+      if (!capacitor || capacitor.getPlatform?.() !== 'android') return null;
+      return capacitor.Plugins?.CallPush || (typeof capacitor.registerPlugin === 'function' ? capacitor.registerPlugin('CallPush') : null);
+    }
+
+    async function subscribeWebPush({ quiet = false } = {}) {
+      const keyResult = await apiRequest('/api/push/public-key');
+      if (!keyResult.configured) {
+        if (!quiet) showToast('In-app notifications are active. Device push is not configured on this server yet.');
+        return false;
+      }
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription()
+        || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(keyResult.publicKey) });
+      await apiRequest('/api/push/subscriptions', { method: 'POST', body: { subscription: subscription.toJSON() } });
+      return true;
+    }
+
+    async function ensureDevicePush() {
+      if (!currentUser) return;
+      const plugin = nativeCallPushPlugin();
+      if (plugin) {
+        try {
+          const result = await plugin.register();
+          nativePushToken = result.token;
+          await apiRequest('/api/push/native-tokens', { method: 'POST', body: { token: result.token, platform: 'android' } });
+          if (result.fullScreenAllowed === false) {
+            showToast('To see calls on the lock screen, allow "Full-screen notifications" for SAFAR KAABE in your phone settings.');
+          }
+        } catch (error) {
+          console.warn('Android call alerts are not available yet.', error);
+        }
+        return;
+      }
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      if (Notification.permission === 'granted') {
+        subscribeWebPush({ quiet: true }).catch(error => console.warn('Device notifications could not be refreshed.', error));
+        return;
+      }
+      if (Notification.permission !== 'default') return;
+      let dismissedAt = 0;
+      try { dismissedAt = Number(window.localStorage.getItem('sk_call_alerts_dismissed') || 0); } catch {}
+      if (Date.now() - dismissedAt < 7 * 86_400_000) return;
+      document.getElementById('callAlertsBanner')?.classList.remove('hidden');
+    }
+
+    async function enableCallAlerts() {
+      document.getElementById('callAlertsBanner')?.classList.add('hidden');
+      await enableWebPush();
+    }
+
+    function dismissCallAlerts() {
+      document.getElementById('callAlertsBanner')?.classList.add('hidden');
+      try { window.localStorage.setItem('sk_call_alerts_dismissed', String(Date.now())); } catch {}
+    }
+
     // ---------- Deep links ----------
     let pendingDeepLink = null;
     function routeDeepLink(link) {
       if (link.trip) {
         bookSavedOffer(link.trip).catch(error => showToast(error.message));
       } else if (link.conversation) {
-        openMessagingCenter().then(() => openConversation(link.conversation)).catch(error => showToast(error.message));
+        openMessagingCenter().then(() => openConversation(link.conversation))
+          .then(() => (link.answerCall || link.showCall) ? openRingingCall(link.answerCall || link.showCall, Boolean(link.answerCall)) : null)
+          .catch(error => showToast(error.message));
       } else if (['REVIEWS', 'REPORTS'].includes(link.agencyTab) && currentUser?.role === 'AGENCY') {
         switchPortal('AGENCY');
         switchAgencyTab(link.agencyTab);
@@ -6299,6 +6613,7 @@
       document.getElementById('accountEmailLabel').textContent = currentUser.email || '';
       loadBlockedContacts();
       loadLoginCodeSettings();
+      syncThemeControls();
       document.getElementById('accountAvatarPreview').innerHTML = avatarMarkup(currentUser.name, currentUser.avatarData, currentUser.avatarMime, 'h-16 w-16');
       document.getElementById('removeAccountAvatarButton').classList.toggle('hidden', !currentUser.avatarData);
       document.getElementById('accountRoleLabel').textContent = currentUser.role === 'SUPER_ADMIN'
@@ -9616,10 +9931,11 @@
       }
       updateBookingPaymentNote();
       const deepLink = new URLSearchParams(window.location.search);
-      const linkTarget = { conversation: deepLink.get('conversation'), booking: deepLink.get('booking'), agencyTab: deepLink.get('agencyTab'), trip: deepLink.get('trip') };
+      const linkTarget = { conversation: deepLink.get('conversation'), booking: deepLink.get('booking'), agencyTab: deepLink.get('agencyTab'), trip: deepLink.get('trip'),
+        answerCall: deepLink.get('answerCall'), showCall: deepLink.get('showCall') };
       if (Object.values(linkTarget).some(Boolean)) {
         const cleanLink = new URL(window.location.href);
-        ['conversation', 'booking', 'agencyTab', 'trip'].forEach(key => cleanLink.searchParams.delete(key));
+        ['conversation', 'booking', 'agencyTab', 'trip', 'answerCall', 'showCall'].forEach(key => cleanLink.searchParams.delete(key));
         window.history.replaceState({}, '', cleanLink.toString());
         if (!currentUser && !linkTarget.trip) {
           // Keep the link so it opens right after the person signs in.

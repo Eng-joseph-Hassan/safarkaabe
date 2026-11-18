@@ -161,3 +161,15 @@ Any user can turn on **Sign-in code by email** on their profile page (current pa
 ### Database backups
 
 Neon keeps a short restore history automatically. For daily copies you control, `.github/workflows/db-backup.yml` runs every night at 03:30 Mogadishu time. It dumps the whole database, encrypts it, and keeps it as a GitHub Actions artifact for 30 days. Add two repository secrets: `DATABASE_URL` (the Neon connection string) and `BACKUP_PASSPHRASE` (a long password; keep it safe, because backups cannot be opened without it). The workflow file has the restore commands.
+
+### Light and dark mode
+
+Everyone can choose **Light**, **Dark** or **Automatic** (same as the phone) on the profile page, or switch quickly with the sun/moon button in the header (the menu on phones). The choice is saved on the device and on the account, so it follows the user when they sign in elsewhere. Dark stays the default.
+
+### Calls ring when the app is closed
+
+- **Browsers and the installed web app:** after sign-in the app asks to *Turn on call alerts*. Incoming calls then show a notification with **Answer** and **Decline** that vibrates and is repeated every few seconds while the call rings, even when the app is closed. This uses the existing `VAPID_*` settings.
+- **Android app:** incoming calls ring continuously with the phone's ringtone, appear on the lock screen, and have **Answer** and **Decline** buttons, like a normal phone call. Messages, bookings and trip reminders also arrive as phone notifications. This uses Firebase Cloud Messaging and needs two one-time steps:
+  1. In the [Firebase console](https://console.firebase.google.com) create a project, add an Android app with package name `com.safarkaabe.travel`, download `google-services.json` into `android/app/`, and rebuild the app.
+  2. In Firebase → Project settings → Service accounts, click **Generate new private key**, and save the whole JSON file contents as the Vercel environment variable `FIREBASE_SERVICE_ACCOUNT`.
+  On Android 14 and newer, users may need to allow **Full-screen notifications** for SAFAR KAABE so calls show over the lock screen; the app tells them when this is needed.

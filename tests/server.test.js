@@ -1866,7 +1866,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /navigator\.serviceWorker\.addEventListener\('controllerchange'/);
   assert.match(appMarkup, /updateViaCache: 'none'/);
   const serviceWorkerSource = await fs.readFile(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.match(serviceWorkerSource, /safar-kaabe-v98/);
+  assert.match(serviceWorkerSource, /safar-kaabe-v99/);
   assert.match(appMarkup, /id="notificationsButton"/);
   assert.match(appMarkup, /function enableWebPush()/);
   assert.match(appMarkup, /function toggleConversationFavorite\(id, event\)/);
@@ -1976,7 +1976,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const serviceWorker = await request('/sw.js');
   assert.equal(serviceWorker.status, 200);
   const serviceWorkerText = await serviceWorker.text();
-  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v98'/);
+  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v99'/);
   assert.match(serviceWorkerText, /const CORE_FILES = \['\.\/', '\.\/the%20style\.html', '\.\/manifest\.webmanifest'\]/);
   assert.match(serviceWorkerText, /Promise\.allSettled\(APP_FILES\.map\(path => cache\.add\(path\)\)\)/);
   assert.match(serviceWorkerText, /request\.headers\.has\('range'\)/);
