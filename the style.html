@@ -1878,6 +1878,23 @@
             <button onclick="switchAgencyTab('STAFF')" id="agTab_STAFF" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Manage Staff (<span id="staffCountLabel">0</span>)</button>
             <button onclick="switchAgencyTab('CLIENTS')" id="agTab_CLIENTS" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Clients (<span id="clientCountLabel">0</span>)</button>
             <button onclick="switchAgencyTab('REVIEWS')" id="agTab_REVIEWS" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Reviews (<span id="agencyReviewCountLabel">0</span>)</button>
+            <button onclick="switchAgencyTab('REPORTS')" id="agTab_REPORTS" class="px-4 py-2 rounded-xl bg-white/5 text-slate-400 hover:text-white">Reports</button>
+          </div>
+
+          <div id="agencySubView_REPORTS" class="hidden space-y-4">
+            <div class="flex flex-wrap items-end justify-between gap-3 px-1">
+              <div>
+                <h3 class="text-lg font-extrabold tracking-tight text-white">Sales report</h3>
+                <p class="mt-1 text-xs text-slate-400">Bookings made between the two dates. "Sales" counts confirmed and paid bookings only.</p>
+              </div>
+              <div class="flex flex-wrap items-end gap-2">
+                <label class="text-[10px] font-bold text-slate-400">From<input id="reportFrom" type="date" class="obsidian-input mt-1 block rounded-xl px-3 py-2 text-xs" /></label>
+                <label class="text-[10px] font-bold text-slate-400">To<input id="reportTo" type="date" class="obsidian-input mt-1 block rounded-xl px-3 py-2 text-xs" /></label>
+                <button type="button" onclick="loadSalesReport('agency')" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200">Show</button>
+                <button type="button" onclick="downloadSalesCsv('agency')" class="rounded-xl bg-[#C909E6] px-3 py-2 text-xs font-bold text-white"><i class="fa-solid fa-file-csv mr-1.5" aria-hidden="true"></i>Download for Excel</button>
+              </div>
+            </div>
+            <div id="agencySalesReport" class="space-y-4"></div>
           </div>
 
           <div id="agencySubView_REVIEWS" class="hidden space-y-4">
@@ -2114,6 +2131,21 @@
               <h3 class="text-sm font-bold text-white">Activity history <span class="font-normal text-slate-400">(cannot be edited)</span></h3>
               <div id="adminAuditLogContainer" class="space-y-2 text-xs max-h-72 overflow-y-auto pr-1"></div>
             </div>
+            <div class="bg-black/40 border border-white/10 rounded-2xl p-5 space-y-3 lg:col-span-2">
+              <div class="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-bold text-white">Sales report – all agencies</h3>
+                  <p class="mt-1 text-[11px] text-slate-400">Bookings made between the two dates. "Sales" counts confirmed and paid bookings only.</p>
+                </div>
+                <div class="flex flex-wrap items-end gap-2">
+                  <label class="text-[10px] font-bold text-slate-400">From<input id="adminReportFrom" type="date" class="obsidian-input mt-1 block rounded-xl px-3 py-2 text-xs" /></label>
+                  <label class="text-[10px] font-bold text-slate-400">To<input id="adminReportTo" type="date" class="obsidian-input mt-1 block rounded-xl px-3 py-2 text-xs" /></label>
+                  <button type="button" onclick="loadSalesReport('admin')" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200">Show</button>
+                  <button type="button" onclick="downloadSalesCsv('admin')" class="rounded-xl bg-[#C909E6] px-3 py-2 text-xs font-bold text-white"><i class="fa-solid fa-file-csv mr-1.5" aria-hidden="true"></i>Download for Excel</button>
+                </div>
+              </div>
+              <div id="adminSalesReport" class="space-y-4 text-xs"><p class="text-slate-400">Choose dates and tap Show.</p></div>
+            </div>
           </div>
         </div>
       </section>
@@ -2200,6 +2232,18 @@
               <p class="mt-1 text-[11px] text-slate-400">People and agencies you block cannot message or call you, and cannot see your status updates.</p>
             </div>
             <div id="blockedContactsList" class="space-y-2"></div>
+          </section>
+
+          <section class="max-w-3xl space-y-3 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5" aria-labelledby="loginCodeSettingsTitle">
+            <div>
+              <h3 id="loginCodeSettingsTitle" class="text-sm font-bold text-white">Sign-in code by email</h3>
+              <p class="mt-1 text-[11px] text-slate-400">When this is on, signing in needs your password and a 6-digit code we email to you. This protects your account if someone learns your password. Recommended for agency and admin accounts.</p>
+            </div>
+            <p id="loginCodeStatus" class="text-xs text-slate-300"></p>
+            <form onsubmit="saveLoginCodeSetting(event)" class="flex flex-wrap items-end gap-2">
+              <label class="min-w-[12rem] flex-1 text-[10px] font-bold text-slate-400">Current password<span class="password-field-wrap mt-1 block"><input id="loginCodePassword" type="password" maxlength="256" autocomplete="current-password" required class="obsidian-input block w-full rounded-xl px-3 py-2 text-xs" /><button type="button" class="password-visibility-toggle" onclick="togglePasswordVisibility('loginCodePassword', this)" aria-label="Show password" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i></button></span></label>
+              <button id="loginCodeToggleButton" type="submit" class="rounded-xl bg-[#C909E6] px-4 py-2 text-xs font-bold text-white">Turn on</button>
+            </form>
           </section>
 
           <form id="accountPasswordForm" onsubmit="changeAccountPassword(event)" class="max-w-3xl space-y-4 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5">
@@ -2574,9 +2618,26 @@
       <div id="chatStatusViewsList" class="max-h-[55dvh] space-y-2 overflow-y-auto p-4"></div>
     </section>
   </div>
+  <div id="loginCodeModal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="loginCodeTitle">
+    <form onsubmit="submitLoginCode(event)" class="glass-panel w-full max-w-sm space-y-4 rounded-3xl border border-white/15 p-6 shadow-2xl">
+      <div><h3 id="loginCodeTitle" class="text-lg font-extrabold text-white"><i class="fa-solid fa-shield-halved mr-2 text-[#E27BF5]" aria-hidden="true"></i>Enter your sign-in code</h3><p id="loginCodeHint" class="mt-1 text-xs text-slate-400"></p></div>
+      <input id="loginCodeInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" required aria-label="6-digit sign-in code" class="obsidian-input w-full rounded-xl px-4 py-3 text-center font-mono-code text-2xl tracking-[0.5em]" />
+      <p id="loginCodeError" class="hidden rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200"></p>
+      <div class="flex justify-end gap-2"><button type="button" onclick="closeLoginCode(null)" class="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Cancel</button><button id="loginCodeSubmit" type="submit" class="rounded-xl bg-[#C909E6] px-5 py-2.5 text-xs font-extrabold text-white">Sign in</button></div>
+    </form>
+  </div>
+  <div id="agencyRefundModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="agencyRefundTitle" onclick="if(event.target===this)closeAgencyRefund()">
+    <form onsubmit="submitAgencyRefund(event)" class="glass-panel w-full max-w-md space-y-4 rounded-3xl border border-white/15 p-6 shadow-2xl">
+      <div><h3 id="agencyRefundTitle" class="font-extrabold text-white">Record refund</h3><p id="agencyRefundDescription" class="mt-1 text-[11px] text-slate-400"></p></div>
+      <label class="block"><span class="mb-1 block text-[11px] font-bold text-slate-300">Refund reference</span><span class="mb-1 block text-[10px] text-slate-500">The transaction number from EVC Plus, Zaad, Sahal, WaafiPay or your bank.</span><input id="agencyRefundReference" maxlength="80" required class="obsidian-input w-full rounded-xl px-3 py-2 text-xs" /></label>
+      <label class="block"><span class="mb-1 block text-[11px] font-bold text-slate-300">Note for the traveler (optional)</span><textarea id="agencyRefundNote" maxlength="300" rows="3" class="obsidian-input w-full rounded-xl px-3 py-2 text-xs"></textarea></label>
+      <div class="flex justify-end gap-2"><button type="button" onclick="closeAgencyRefund()" class="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Cancel</button><button id="agencyRefundSave" type="submit" class="rounded-xl bg-[#C909E6] px-5 py-2.5 text-xs font-extrabold text-white">Save refund</button></div>
+    </form>
+  </div>
   <div id="savedOffersModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="savedOffersTitle" onclick="if(event.target===this)closeSavedOffersModal()">
     <section class="glass-panel max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-3xl border border-white/15 p-6 shadow-2xl">
       <header class="flex items-center justify-between gap-3 border-b border-white/10 pb-4"><div><h3 id="savedOffersTitle" class="text-lg font-extrabold text-white"><i class="fa-solid fa-heart mr-2 text-fuchsia-300" aria-hidden="true"></i>Saved trips</h3><p class="text-xs text-slate-400">Trips you saved to compare or book later. Prices and seats can change until you send a request.</p></div><button type="button" onclick="closeSavedOffersModal()" class="rounded-xl bg-white/10 px-3.5 py-2 text-xs font-bold text-white">Close</button></header>
+      <div id="waitlistList" class="space-y-2"></div>
       <div id="savedOffersList" class="space-y-3"></div>
     </section>
   </div>
@@ -2613,6 +2674,7 @@
         <button id="agencyBookingApproveAction" type="button" onclick="approveActiveAgencyBooking()" class="w-full rounded-xl bg-[#C909E6]/10 px-4 py-3 text-left text-xs font-bold text-[#E27BF5]"><i class="fa-solid fa-check mr-2"></i>Approve request</button>
         <button id="agencyBookingUndoAcceptanceAction" type="button" onclick="undoActiveAgencyBookingAcceptance()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-rotate-left mr-2"></i>Undo acceptance</button>
         <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i><span id="agencyBookingCancelActionLabel">Delete request</span></button>
+        <button id="agencyBookingRefundAction" type="button" onclick="openAgencyRefund()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Record refund sent to traveler</button>
         <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">The canceled request stays in booking history. Seats return to inventory when the ticket has not been issued.</p>
         <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
       </div>
@@ -2903,6 +2965,7 @@
           const endpoint = `${options.method || 'GET'} ${path}`;
           const error = new Error(response.status >= 500 ? `${message} (${endpoint})` : message);
           error.status = response.status;
+          error.payload = payload;
           throw error;
         }
         return payload;
@@ -3084,6 +3147,10 @@
           });
         } else {
           result = await apiRequest('/api/auth/login', { method: 'POST', body: { email, password } });
+          if (result.loginCodeRequired) {
+            result = await askForLoginCode(result);
+            if (!result) return;
+          }
         }
         await startAuthenticatedApp(result.user);
       } catch (error) {
@@ -3360,6 +3427,11 @@
         startCallPolling();
         startCustomerOfferRefresh();
         document.getElementById('authGate').classList.add('hidden');
+        if (pendingDeepLink) {
+          const link = pendingDeepLink;
+          pendingDeepLink = null;
+          routeDeepLink(link);
+        }
       } catch (error) {
         await showAuthGate(false);
         showAuthError(`Signed in, but the workspace could not be loaded: ${error.message}`);
@@ -3903,6 +3975,9 @@
         } else if (item.type === 'REVIEW_RECEIVED' && currentUser?.role === 'AGENCY') {
           switchPortal('AGENCY');
           switchAgencyTab('REVIEWS');
+        } else if (item.type === 'WAITLIST_SEATS_OPEN' && item.href) {
+          const tripId = new URL(item.href, window.location.origin).searchParams.get('trip');
+          if (tripId) await bookSavedOffer(tripId);
         } else if (item.bookingId && currentUser?.role === 'CLIENT') {
           BOOKINGS = (await apiRequest('/api/bookings')).bookings;
           const booking = BOOKINGS.find(entry => entry.id === item.bookingId);
@@ -4624,6 +4699,261 @@
       } catch (error) { showToast(error.message); }
     }
 
+    // ---------- Refunds ----------
+    function refundBadge(booking, travelerView = false) {
+      if (booking?.refundStatus === 'NEEDED') {
+        return `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold bg-amber-500/15 text-amber-200">${travelerView ? 'Refund on the way' : 'Refund needed'}</span>`;
+      }
+      if (booking?.refundStatus === 'REFUNDED') {
+        return `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold bg-[#C909E6]/15 text-[#E27BF5]" title="${escapeHtml(booking.refundReference ? `Refund reference: ${booking.refundReference}` : '')}">Refunded${booking.refundReference ? ` · ${escapeHtml(booking.refundReference)}` : ''}</span>`;
+      }
+      return '';
+    }
+
+    function openAgencyRefund() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || booking.refundStatus !== 'NEEDED') return;
+      closeAgencyBookingActions();
+      const amountCents = booking.paymentAmountCents ?? booking.financials?.customerGrandTotalCents;
+      document.getElementById('agencyRefundDescription').textContent =
+        `Booking ${booking.ref} · ${booking.travelerName}${Number.isFinite(Number(amountCents)) ? ` · ${formatMoney(Number(amountCents))}` : ''}. Send the money back first, then save the reference here. The traveler will be told.`;
+      document.getElementById('agencyRefundReference').value = '';
+      document.getElementById('agencyRefundNote').value = '';
+      const modal = document.getElementById('agencyRefundModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      window.setTimeout(() => document.getElementById('agencyRefundReference').focus(), 50);
+    }
+
+    function closeAgencyRefund() {
+      const modal = document.getElementById('agencyRefundModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    async function submitAgencyRefund(event) {
+      event.preventDefault();
+      const booking = getActiveAgencyBooking();
+      if (!booking) return;
+      const button = document.getElementById('agencyRefundSave');
+      button.disabled = true;
+      try {
+        const { booking: updated } = await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}`, {
+          method: 'PATCH',
+          body: { action: 'MARK_REFUNDED', refundReference: document.getElementById('agencyRefundReference').value.trim(), refundNote: document.getElementById('agencyRefundNote').value.trim() }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updated.id ? { ...item, ...updated } : item);
+        closeAgencyRefund();
+        renderAgencyPortal();
+        renderAdminPortal();
+        showToast('Refund saved. The traveler has been told.');
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    // ---------- Sales reports ----------
+    function salesReportRange(scope) {
+      const prefix = scope === 'admin' ? 'adminReport' : 'report';
+      const fromInput = document.getElementById(`${prefix}From`);
+      const toInput = document.getElementById(`${prefix}To`);
+      const today = new Date().toISOString().slice(0, 10);
+      if (!toInput.value) toInput.value = today;
+      if (!fromInput.value) fromInput.value = new Date(Date.now() - 89 * 86_400_000).toISOString().slice(0, 10);
+      return { from: fromInput.value, to: toInput.value };
+    }
+
+    function salesTableMarkup(title, firstColumn, rows, labelOf) {
+      if (!rows.length) return '';
+      return `<div class="overflow-x-auto rounded-2xl border border-white/10"><table class="w-full min-w-[28rem] text-left text-xs"><caption class="px-3 pt-3 text-left text-[11px] font-bold text-slate-300">${escapeHtml(title)}</caption>
+        <thead class="text-[10px] uppercase tracking-wide text-slate-500"><tr><th class="px-3 py-2">${escapeHtml(firstColumn)}</th><th class="px-3 py-2 text-right">Requests</th><th class="px-3 py-2 text-right">Confirmed</th><th class="px-3 py-2 text-right">Seats sold</th><th class="px-3 py-2 text-right">Sales</th></tr></thead>
+        <tbody>${rows.map(row => `<tr class="border-t border-white/5"><td class="px-3 py-2 font-bold text-white">${escapeHtml(labelOf(row))}</td><td class="px-3 py-2 text-right text-slate-300">${row.requests}</td><td class="px-3 py-2 text-right text-slate-300">${row.confirmed}</td><td class="px-3 py-2 text-right text-slate-300">${row.seatsSold}</td><td class="px-3 py-2 text-right font-mono-code text-[#E27BF5]">${escapeHtml(formatMoney(row.salesCents))}</td></tr>`).join('')}</tbody></table></div>`;
+    }
+
+    async function loadSalesReport(scope = 'agency') {
+      const container = document.getElementById(scope === 'admin' ? 'adminSalesReport' : 'agencySalesReport');
+      if (!container) return;
+      const { from, to } = salesReportRange(scope);
+      container.innerHTML = '<p class="py-6 text-center text-xs text-slate-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading report…</p>';
+      try {
+        const report = await apiRequest(`/api/reports/sales?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        const totals = report.totals;
+        const cards = [
+          ['Requests', totals.requests], ['Confirmed bookings', totals.confirmed], ['Seats sold', totals.seatsSold],
+          ['Sales', formatMoney(totals.salesCents)], ['Paid online', formatMoney(totals.paidOnlineCents)], ['Refunds waiting', report.refundsNeeded]
+        ];
+        const monthName = row => new Date(`${row.month}-01T00:00:00Z`).toLocaleDateString([], { month: 'long', year: 'numeric', timeZone: 'UTC' });
+        container.innerHTML = totals.requests
+          ? `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">${cards.map(([label, value]) => `<div class="rounded-2xl border border-white/10 bg-white/[.03] p-3"><div class="text-[10px] text-slate-400">${escapeHtml(label)}</div><div class="mt-1 text-lg font-extrabold ${label === 'Refunds waiting' && Number(value) > 0 ? 'text-amber-200' : 'text-white'}">${escapeHtml(String(value))}</div></div>`).join('')}</div>
+            ${salesTableMarkup('By trip', 'Trip', report.byTrip, row => row.trip)}
+            ${salesTableMarkup('By month', 'Month', report.byMonth, monthName)}`
+          : `<p class="rounded-2xl border border-dashed border-white/15 px-4 py-10 text-center text-xs text-slate-400">No bookings between ${escapeHtml(from)} and ${escapeHtml(to)}.</p>`;
+      } catch (error) {
+        container.innerHTML = `<p class="py-6 text-center text-xs text-rose-200">${escapeHtml(error.message)}</p>`;
+      }
+    }
+
+    async function downloadSalesCsv(scope = 'agency') {
+      const { from, to } = salesReportRange(scope);
+      try {
+        const response = await fetch(`/api/reports/sales?format=csv&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || 'The report could not be downloaded. Try again.');
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `safar-kaabe-sales-${from}-to-${to}.csv`;
+        document.body.appendChild(link); link.click(); link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        showToast('Report downloaded. Open it with Excel or Google Sheets.');
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    // ---------- Waitlist ----------
+    let WAITLIST = [];
+    function renderWaitlist() {
+      const container = document.getElementById('waitlistList');
+      if (!container) return;
+      if (!WAITLIST.length) { container.innerHTML = ''; return; }
+      container.innerHTML = `<h4 class="text-xs font-bold uppercase tracking-wide text-slate-400"><i class="fa-regular fa-bell mr-1.5 text-[#E27BF5]" aria-hidden="true"></i>Waiting for seats</h4>` +
+        WAITLIST.map(entry => {
+          const open = Number(entry.available) >= Number(entry.seatCount);
+          return `<article class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border ${open ? 'border-[#C909E6]/40 bg-[#C909E6]/10' : 'border-white/10 bg-white/[.02]'} p-3 text-xs">
+            <div><div class="font-bold text-white">${escapeHtml(entry.title)}</div><div class="mt-1 text-[11px] text-slate-400">${escapeHtml(entry.agencyName || '')}${entry.travelDate ? ` · ${escapeHtml(entry.travelDate)}` : ''} · ${Number(entry.seatCount)} ${Number(entry.seatCount) === 1 ? 'seat' : 'seats'} wanted</div>
+            <div class="mt-1 text-[11px] ${open ? 'font-bold text-[#E27BF5]' : 'text-slate-400'}">${open ? 'Seats are free now – book before someone else does.' : 'We will notify you when seats open.'}</div></div>
+            <div class="flex gap-2">${open ? `<button type="button" onclick="bookSavedOffer('${escapeHtml(entry.offerId)}')" class="rounded-xl bg-[#C909E6] px-3 py-2 font-bold text-white">Book now</button>` : ''}<button type="button" onclick="leaveWaitlist('${escapeHtml(entry.offerId)}')" class="rounded-xl border border-white/10 px-3 py-2 font-bold text-slate-300">Leave waitlist</button></div>
+          </article>`;
+        }).join('');
+    }
+
+    async function joinWaitlist(offerId, seatCount = 1) {
+      if (!currentUser) { showToast('Sign in to join the waitlist.'); openAuthGate('login'); return; }
+      const result = await apiRequest(`/api/offers/${encodeURIComponent(offerId)}/waitlist`, { method: 'POST', body: { seatCount } });
+      showToast(result.message);
+      await loadSavedOffers().catch(() => {});
+      if (!document.getElementById('savedOffersModal').classList.contains('hidden')) renderSavedOffers();
+    }
+
+    async function leaveWaitlist(offerId) {
+      try {
+        const result = await apiRequest(`/api/offers/${encodeURIComponent(offerId)}/waitlist`, { method: 'DELETE' });
+        showToast(result.message);
+        await loadSavedOffers();
+        renderSavedOffers();
+      } catch (error) { showToast(error.message); }
+    }
+
+    // ---------- Sign-in codes ----------
+    let loginCodeResolver = null;
+    let loginCodeChallengeId = null;
+    function askForLoginCode(challenge) {
+      loginCodeChallengeId = challenge.challengeId;
+      document.getElementById('loginCodeHint').textContent = `We emailed a 6-digit code to ${challenge.emailHint || 'your email address'}. It expires in 10 minutes.`;
+      const input = document.getElementById('loginCodeInput');
+      input.value = '';
+      document.getElementById('loginCodeError').classList.add('hidden');
+      const modal = document.getElementById('loginCodeModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      window.setTimeout(() => input.focus(), 50);
+      return new Promise(resolve => { loginCodeResolver = resolve; });
+    }
+
+    function closeLoginCode(result = null) {
+      const modal = document.getElementById('loginCodeModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      const resolve = loginCodeResolver;
+      loginCodeResolver = null;
+      loginCodeChallengeId = null;
+      resolve?.(result);
+    }
+
+    async function submitLoginCode(event) {
+      event.preventDefault();
+      const button = document.getElementById('loginCodeSubmit');
+      const errorBox = document.getElementById('loginCodeError');
+      button.disabled = true;
+      try {
+        const result = await apiRequest('/api/auth/login/verify', { method: 'POST', body: { challengeId: loginCodeChallengeId, code: document.getElementById('loginCodeInput').value.trim() } });
+        closeLoginCode(result);
+      } catch (error) {
+        if (error.status === 429 || /expired/i.test(error.message)) {
+          closeLoginCode(null);
+          showAuthError(error.message);
+          return;
+        }
+        errorBox.textContent = error.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function loadLoginCodeSettings() {
+      const status = document.getElementById('loginCodeStatus');
+      const button = document.getElementById('loginCodeToggleButton');
+      if (!status || !currentUser) return;
+      const enabled = Boolean(currentUser.loginCodeEnabled);
+      button.textContent = enabled ? 'Turn off' : 'Turn on';
+      button.className = enabled
+        ? 'rounded-xl border border-white/15 px-4 py-2 text-xs font-bold text-slate-200'
+        : 'rounded-xl bg-[#C909E6] px-4 py-2 text-xs font-bold text-white';
+      status.textContent = enabled ? 'On – you will be asked for a code from your email each time you sign in.' : 'Off – you sign in with your password only.';
+      button.disabled = false;
+      try {
+        const { loginCodesAvailable } = await apiRequest('/api/auth/session');
+        if (!loginCodesAvailable && !enabled) {
+          status.textContent = 'Not available yet: email sending is not set up on the server. Contact SAFAR KAABE support.';
+          button.disabled = true;
+        }
+      } catch (error) {
+        console.warn('Sign-in code settings could not be checked.', error);
+      }
+    }
+
+    async function saveLoginCodeSetting(event) {
+      event.preventDefault();
+      const passwordInput = document.getElementById('loginCodePassword');
+      const enable = !currentUser.loginCodeEnabled;
+      try {
+        const { user } = await apiRequest('/api/auth/login-code', { method: 'PATCH', body: { enabled: enable, password: passwordInput.value } });
+        currentUser = { ...currentUser, ...user };
+        passwordInput.value = '';
+        await loadLoginCodeSettings();
+        showToast(enable ? 'Sign-in codes are on. Next time you sign in, check your email for the code.' : 'Sign-in codes are off.');
+      } catch (error) { showToast(error.message); }
+    }
+
+    // ---------- Deep links ----------
+    let pendingDeepLink = null;
+    function routeDeepLink(link) {
+      if (link.trip) {
+        bookSavedOffer(link.trip).catch(error => showToast(error.message));
+      } else if (link.conversation) {
+        openMessagingCenter().then(() => openConversation(link.conversation)).catch(error => showToast(error.message));
+      } else if (['REVIEWS', 'REPORTS'].includes(link.agencyTab) && currentUser?.role === 'AGENCY') {
+        switchPortal('AGENCY');
+        switchAgencyTab(link.agencyTab);
+      } else if (link.booking && currentUser?.role === 'AGENCY') {
+        activeAgencyBookingId = link.booking;
+        switchPortal('AGENCY');
+        if (BOOKINGS.some(booking => booking.id === link.booking)) viewActiveAgencyBooking();
+      } else if (link.booking) {
+        const booking = BOOKINGS.find(entry => entry.id === link.booking);
+        openMyTripsModal();
+        const search = document.getElementById('myTripsSearch');
+        if (search && booking?.ref) { search.value = booking.ref; renderMyTrips(); }
+      }
+    }
+
     async function loadBlockedContacts() {
       const list = document.getElementById('blockedContactsList');
       if (!list || !currentUser) return;
@@ -4752,6 +5082,18 @@
       }, 1800);
     }
 
+    // Identifies this browser tab (kept across reloads) so a call is only cleaned up by the tab that held it.
+    const CALL_DEVICE_ID = (() => {
+      const fresh = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+      try {
+        let id = window.sessionStorage.getItem('sk_call_device');
+        if (!id) { id = fresh(); window.sessionStorage.setItem('sk_call_device', id); }
+        return id;
+      } catch {
+        return fresh();
+      }
+    })();
+
     async function syncActiveCalls() {
       if (!currentUser || callPollingInProgress) return;
       callPollingInProgress = true;
@@ -4773,9 +5115,9 @@
           pollCallSignals();
           return;
         }
-        // A connected call this app no longer holds (for example after a reload) would block
-        // every future call between these people, so end it.
-        for (const orphan of calls.filter(call => call.status === 'ACCEPTED')) {
+        // A connected call that THIS tab started or answered but no longer holds (for example after a reload)
+        // would block every future call, so end it. Calls held on another device or tab are left alone.
+        for (const orphan of calls.filter(call => call.status === 'ACCEPTED' && call.myDeviceId && call.myDeviceId === CALL_DEVICE_ID)) {
           apiRequest(`/api/calls/${encodeURIComponent(orphan.id)}`, { method: 'PATCH', body: { action: 'END' } })
             .catch(error => console.warn('An interrupted call could not be ended.', error));
         }
@@ -4876,7 +5218,7 @@
       try {
         const { call } = await apiRequest(`/api/conversations/${encodeURIComponent(activeConversationId)}/calls`, {
           method: 'POST',
-          body: { callType }
+          body: { callType, deviceId: CALL_DEVICE_ID }
         });
         activeCall = call;
         showChatCallOverlay(call);
@@ -4908,7 +5250,7 @@
       showChatCallOverlay(call);
       try {
         await initializeCallMediaAndPeer(call);
-        await apiRequest(`/api/calls/${encodeURIComponent(call.id)}`, { method: 'PATCH', body: { action: 'ACCEPT' } });
+        await apiRequest(`/api/calls/${encodeURIComponent(call.id)}`, { method: 'PATCH', body: { action: 'ACCEPT', deviceId: CALL_DEVICE_ID } });
         activeCall.status = 'ACCEPTED';
         setCallStatus('Connecting…');
         startCallPolling();
@@ -5559,6 +5901,11 @@
         if (document.activeElement !== progress) progress.value = duration > 0 ? String(Math.min(1000, Math.round(position / duration * 1000))) : '0';
         player.querySelector('.voice-time').textContent = `${formatVoiceTime(position)} / ${duration > 0 ? formatVoiceTime(duration) : '--:--'}`;
       });
+      // The message being played was deleted or is no longer shown: stop it so it cannot keep playing unseen.
+      if (voicePlayer.audio && voicePlayer.messageId &&
+          !document.querySelector(`.voice-player[data-voice-id="${window.CSS?.escape ? CSS.escape(voicePlayer.messageId) : voicePlayer.messageId}"]`)) {
+        stopVoicePlayback();
+      }
     }
 
     function stopVoicePlayback() {
@@ -5617,6 +5964,7 @@
       if (!activeConversationId || !window.confirm('Delete this message for everyone in the conversation?')) return;
       try {
         await apiRequest(`/api/conversations/${encodeURIComponent(activeConversationId)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' });
+        if (voicePlayer.messageId === messageId) stopVoicePlayback();
         await loadConversations();
         await renderConversationMessages(activeConversationId, false, false);
         showToast('Message deleted.');
@@ -5950,6 +6298,7 @@
       document.getElementById('accountPhone').value = currentUser.phone || '';
       document.getElementById('accountEmailLabel').textContent = currentUser.email || '';
       loadBlockedContacts();
+      loadLoginCodeSettings();
       document.getElementById('accountAvatarPreview').innerHTML = avatarMarkup(currentUser.name, currentUser.avatarData, currentUser.avatarMime, 'h-16 w-16');
       document.getElementById('removeAccountAvatarButton').classList.toggle('hidden', !currentUser.avatarData);
       document.getElementById('accountRoleLabel').textContent = currentUser.role === 'SUPER_ADMIN'
@@ -6530,7 +6879,8 @@
     function switchAgencyTab(tab) {
       currentAgencyTab = tab;
       if (tab === 'REVIEWS') loadAgencyDashboardReviews().catch(error => showToast(error.message));
-      ['OVERVIEW', 'STAFF', 'CLIENTS', 'REVIEWS'].forEach(t => {
+      if (tab === 'REPORTS') loadSalesReport('agency');
+      ['OVERVIEW', 'STAFF', 'CLIENTS', 'REVIEWS', 'REPORTS'].forEach(t => {
         document.getElementById(`agencySubView_${t}`).classList.toggle('hidden', t !== tab);
         const btn = document.getElementById(`agTab_${t}`);
         if (t === tab) {
@@ -6664,18 +7014,33 @@
       }, 15_000);
     }
 
+    let customerOfferStreamGeneration = 0;
+    let customerOfferConnectPending = null;
     function stopCustomerOfferUpdates() {
+      customerOfferStreamGeneration += 1;
       if (customerOfferRefreshTimer) window.clearInterval(customerOfferRefreshTimer);
       customerOfferRefreshTimer = null;
       if (customerOfferEventSource) customerOfferEventSource.close();
       customerOfferEventSource = null;
     }
 
-    async function connectCustomerOfferStream() {
+    // Only one connection attempt at a time: focus and visibilitychange often fire together.
+    function connectCustomerOfferStream() {
+      if (!customerOfferConnectPending) {
+        customerOfferConnectPending = openCustomerOfferStream().finally(() => { customerOfferConnectPending = null; });
+      }
+      return customerOfferConnectPending;
+    }
+
+    async function openCustomerOfferStream() {
       if (!window.EventSource || document.hidden) return;
       if (customerOfferEventSource && customerOfferEventSource.readyState !== EventSource.CLOSED) return;
+      const generation = customerOfferStreamGeneration;
       try {
         const { supported } = await apiRequest('/api/catalog/realtime');
+        // Updates were stopped, or another stream opened, while we waited.
+        if (generation !== customerOfferStreamGeneration ||
+            (customerOfferEventSource && customerOfferEventSource.readyState !== EventSource.CLOSED)) return;
         if (!supported || document.hidden) {
           updateTravelOffersStatus('Trips refresh automatically every 15 seconds while this page is open.');
           return;
@@ -6690,6 +7055,7 @@
           refreshCustomerOffers().catch(error => console.warn('Unable to load the latest trips after connecting live updates.', error));
         };
         source.addEventListener('offers', () => {
+          if (customerOfferEventSource !== source) { source.close(); return; }
           updateTravelOffersStatus('A trip was updated. Refreshing available trips…');
           refreshCustomerOffers().then(() => {
             if (customerOfferEventSource === source) updateTravelOffersStatus('Available trips are up to date.');
@@ -6892,7 +7258,13 @@
       }
       const seatCount = Number(document.getElementById('bookingSeatCount').value);
       if (!Number.isSafeInteger(seatCount) || seatCount < 1 || seatCount > Number(selectedOffer.available)) {
-        showToast(`Choose between 1 and ${Number(selectedOffer.available) || 0} available seats.`);
+        const left = Number(selectedOffer.available) || 0;
+        if (currentUser?.role === 'CLIENT' && Number.isSafeInteger(seatCount) && seatCount > left && seatCount <= 50 &&
+            window.confirm(`Only ${left} ${left === 1 ? 'seat is' : 'seats are'} left. Join the waitlist? We will notify you when ${seatCount} seats are free.`)) {
+          joinWaitlist(selectedOffer.id, seatCount).catch(error => showToast(error.message));
+          return;
+        }
+        showToast(`Choose between 1 and ${left} available seats.`);
         return;
       }
       const travelerName = `${document.getElementById('travFirstName').value.trim()} ${document.getElementById('travLastName').value.trim()}`.trim();
@@ -6949,6 +7321,10 @@
         showToast(error.message);
         if (error.status === 409) {
           refreshCustomerOffers().catch(refreshError => console.warn('Unable to refresh trip availability.', refreshError));
+          if (error.payload?.waitlistAvailable &&
+              window.confirm(`${error.message}\n\nJoin the waitlist? We will notify you when ${seatCount === 1 ? 'a seat is' : `${seatCount} seats are`} free.`)) {
+            joinWaitlist(bookedOfferId, seatCount).catch(waitError => showToast(waitError.message));
+          }
         }
       } finally {
         if (button?.isConnected) button.disabled = false;
@@ -7192,7 +7568,10 @@
       AGENCY_PRODUCT_UNPUBLISHED: 'Trip hidden from travelers', AGENCY_PRODUCT_REMOVED: 'Trip removed',
       WAAFI_CHECKOUT_STARTED: 'Online payment started', WAAFI_PAYMENT_APPROVED: 'Online payment confirmed',
       WAAFI_PAYMENT_DECLINED: 'Online payment not completed', PAYMENT_HOLDS_RELEASED: 'Seats from unpaid checkouts released',
-      CONTACT_BLOCKED: 'Blocked a contact', CONTACT_UNBLOCKED: 'Unblocked a contact'
+      CONTACT_BLOCKED: 'Blocked a contact', CONTACT_UNBLOCKED: 'Unblocked a contact',
+      BOOKING_REFUND_RECORDED: 'Refund sent to traveler', PAYMENT_RECEIVED_FOR_CANCELLED_BOOKING: 'Payment arrived for a cancelled booking – refund needed',
+      LOGIN_CODES_ENABLED: 'Turned on sign-in codes', LOGIN_CODES_DISABLED: 'Turned off sign-in codes',
+      LOGIN_CODE_SKIPPED: 'Signed in without a code (email not set up)', BOOKING_REQUEST_RESTORED: 'Declined request restored'
     };
     function auditActionLabel(action) {
       const text = String(action || '');
@@ -7237,6 +7616,7 @@
       document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
       document.getElementById('agencyBookingApproveAction').classList.toggle('hidden', !canAccept);
       document.getElementById('agencyBookingUndoAcceptanceAction').classList.toggle('hidden', !canUndoAcceptance);
+      document.getElementById('agencyBookingRefundAction').classList.toggle('hidden', booking.refundStatus !== 'NEEDED');
       const cancelButton = document.getElementById('agencyBookingCancelAction');
       cancelButton.classList.toggle('hidden', !canEdit && !canCancel);
       cancelButton.disabled = !canCancel;
@@ -7246,8 +7626,8 @@
       retentionNote.classList.toggle('hidden', !canCancel);
       retentionNote.textContent = paymentReceived
         ? booking.offerId
-          ? 'The canceled booking stays in history. Refunds are not automatic. Seats return only if you confirm the ticket was not issued.'
-          : 'The canceled booking stays in history. Refunds are not automatic, and these older seats cannot be returned from this screen.'
+          ? 'The canceled booking stays in history. Send the money back yourself, then tap "Record refund". Seats return only if you confirm the ticket was not issued.'
+          : 'The canceled booking stays in history. Send the money back yourself, then tap "Record refund". These older seats cannot be returned from this screen.'
         : 'The canceled request stays in booking history. Its seats return to inventory.';
       const cancelNote = document.getElementById('agencyBookingCancelNote');
       cancelNote.classList.toggle('hidden', canCancel || (!canEdit && booking.state !== 'ACCEPTED'));
@@ -7275,7 +7655,7 @@
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Traveler</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.travelerName)}</div><div class="mt-1 break-all text-[10px] text-slate-400">${escapeHtml(booking.travelerEmail || 'No email')} · ${escapeHtml(booking.phone)}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Trip</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.offerTitle)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(booking.category)}${booking.travelDate ? ` · ${escapeHtml(booking.travelDate)}` : ' · Flexible date'}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Seats requested</div><div class="mt-1 font-bold text-white">${Number(booking.seatCount) || 1}</div><div class="mt-1 text-[10px] text-slate-400">Booking code: ${escapeHtml(booking.pnr)}</div></div>
-          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}</div><div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}${refundBadge(booking)}</div><div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Record timestamps</div><div class="mt-1 text-[10px] text-slate-300">Created: ${escapeHtml(formatBookingDateTime(booking.createdAtUtc))}</div><div class="mt-1 text-[10px] text-slate-300">Updated: ${escapeHtml(formatBookingDateTime(booking.updatedAtUtc || booking.createdAtUtc))}</div></div>
         </div>`;
       const modal = document.getElementById('agencyBookingDetailsModal');
@@ -7576,7 +7956,7 @@
               <td data-label="Estimated total" class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
               <td data-label="Potential commission" class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
               <td data-label="Status and actions" class="min-w-[150px] p-3 text-right"><div class="agency-booking-row-actions">
-                ${bookingStatePresentation(b.state)}
+                ${bookingStatePresentation(b.state)}${refundBadge(b)}
                 ${canToggleAcceptance ? `<button id="agencyBookingToggle_${menuId}" type="button" onclick="toggleAgencyBookingAcceptance('${menuId}')" class="booking-approve-button ${canUndoAcceptance ? 'booking-undo-button' : ''}" aria-label="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'} for booking ${escapeHtml(b.ref)}" title="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}"><i class="fa-solid ${canUndoAcceptance ? 'fa-rotate-left' : 'fa-check'}" aria-hidden="true"></i><span>${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}</span></button>` : ''}
                 <button type="button" onclick="viewAgencyBookingFromRow('${menuId}')" class="agency-booking-icon-button" aria-label="View booking details for ${escapeHtml(b.ref)}" title="View booking details"><i class="fa-regular fa-eye" aria-hidden="true"></i></button>
                 <button type="button" onclick="contactTravelerFromBooking('${menuId}',event)" class="agency-booking-icon-button ${canContact ? '' : 'opacity-50'}" ${canContact ? '' : 'disabled title="Traveler account not linked"'} aria-label="Contact traveler for ${escapeHtml(b.ref)}" title="Contact traveler"><i class="fa-regular fa-comments" aria-hidden="true"></i></button>
@@ -8486,7 +8866,7 @@
         return `<article class="voucher-print-card overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#111c32] to-black/60 text-xs shadow-xl">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
             <div class="flex min-w-0 items-center gap-3">${avatarMarkup(b.agencyName || 'Agency', b.agencyLogoData, b.agencyLogoMime, 'h-12 w-12')}<div><div class="font-mono-code text-[10px] font-bold text-blue-300">BOOKING ${escapeHtml(b.ref)}</div><h4 class="mt-1 text-sm font-extrabold text-white">${escapeHtml(b.offerTitle || b.agencyName || 'Travel booking')}</h4><div class="text-[10px] text-slate-400">${escapeHtml(b.agencyName || 'Assigned agency')}${b.agencyPhone ? ` · ${escapeHtml(b.agencyPhone)}` : ''}</div></div></div>
-            <span class="rounded-full border px-2.5 py-1 text-[9px] font-bold ${statusClass}">${escapeHtml(TRAVELER_BOOKING_STATE_LABELS[b.state] || 'Status unknown – refresh the page')}</span>
+            <span class="flex flex-wrap items-center gap-1"><span class="rounded-full border px-2.5 py-1 text-[9px] font-bold ${statusClass}">${escapeHtml(TRAVELER_BOOKING_STATE_LABELS[b.state] || 'Status unknown – refresh the page')}</span>${refundBadge(b, true)}</span>
           </div>
           <div class="grid gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
             <div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Passenger</div><div class="mt-1 text-slate-200">${escapeHtml(b.travelerName || 'Not provided')}</div></div>
@@ -8714,7 +9094,11 @@
         updateSavedOffersBadge();
         return;
       }
-      const result = await apiRequest('/api/saved-offers');
+      const [result, waitlist] = await Promise.all([
+        apiRequest('/api/saved-offers'),
+        apiRequest('/api/waitlist').catch(error => { console.warn('Waitlist could not be loaded.', error); return { waitlist: [] }; })
+      ]);
+      WAITLIST = waitlist.waitlist || [];
       SAVED_OFFERS = result.savedOffers || [];
       SAVED_OFFER_IDS = new Set(SAVED_OFFERS.map(item => item.id));
       updateSavedOffersBadge();
@@ -8746,6 +9130,7 @@
     }
 
     function renderSavedOffers() {
+      renderWaitlist();
       const list = document.getElementById('savedOffersList');
       if (!SAVED_OFFERS.length) {
         list.innerHTML = '<div class="rounded-2xl border border-dashed border-white/15 px-4 py-12 text-center text-sm text-slate-400"><i class="fa-regular fa-heart mb-3 block text-2xl text-fuchsia-300" aria-hidden="true"></i>No saved trips yet. Tap the heart on any trip to save it here.</div>';
@@ -8754,6 +9139,11 @@
       list.innerHTML = SAVED_OFFERS.map(offer => {
         const title = currentLocale === 'so' && offer.titleSo ? offer.titleSo : offer.titleEn;
         const savedDate = new Date(offer.savedAt).toLocaleDateString([], { dateStyle: 'medium' });
+        if (!offer.bookable && offer.soldOut) {
+          return `<article class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/[.04] p-4 text-xs"><div><h4 class="font-bold text-white">${escapeHtml(title || 'Trip')}</h4><div class="mt-1 text-[11px] text-slate-400">${escapeHtml(offer.agencyName || '')} · <span class="font-bold text-amber-200">Sold out</span>${offer.travelDate ? ` · ${escapeHtml(offer.travelDate)}` : ''}</div><div class="mt-1 text-[11px] text-slate-400">${offer.waitlisted ? 'You are on the waitlist. We will notify you when seats open.' : 'Join the waitlist and we will notify you when seats open.'}</div></div><div class="flex gap-2">${offer.waitlisted
+            ? `<button type="button" onclick="leaveWaitlist('${escapeHtml(offer.id)}')" class="rounded-xl border border-white/10 px-3 py-2 font-bold text-slate-300">Leave waitlist</button>`
+            : `<button type="button" onclick="joinWaitlist('${escapeHtml(offer.id)}', 1)" class="rounded-xl bg-[#C909E6] px-3 py-2 font-bold text-white"><i class="fa-regular fa-bell mr-1"></i>Notify me</button>`}<button type="button" onclick="toggleSavedOffer('${escapeHtml(offer.id)}', event)" class="rounded-xl border border-white/10 px-3 py-2 font-bold text-slate-300">Remove</button></div></article>`;
+        }
         if (!offer.bookable) {
           return `<article class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[.02] p-4 text-xs opacity-75"><div><h4 class="font-bold text-slate-300">${escapeHtml(title || 'Trip')}</h4><div class="mt-1 text-[11px] text-slate-500">${escapeHtml(offer.agencyName || '')} · No longer available · saved ${escapeHtml(savedDate)}</div></div><button type="button" onclick="toggleSavedOffer('${escapeHtml(offer.id)}', event)" class="rounded-xl border border-white/10 px-3 py-2 font-bold text-slate-300">Remove</button></article>`;
         }
@@ -9226,30 +9616,18 @@
       }
       updateBookingPaymentNote();
       const deepLink = new URLSearchParams(window.location.search);
-      const linkedConversation = deepLink.get('conversation');
-      const linkedBooking = deepLink.get('booking');
-      const linkedAgencyTab = deepLink.get('agencyTab');
-      if (linkedConversation || linkedBooking || linkedAgencyTab) {
+      const linkTarget = { conversation: deepLink.get('conversation'), booking: deepLink.get('booking'), agencyTab: deepLink.get('agencyTab'), trip: deepLink.get('trip') };
+      if (Object.values(linkTarget).some(Boolean)) {
         const cleanLink = new URL(window.location.href);
-        ['conversation', 'booking', 'agencyTab'].forEach(key => cleanLink.searchParams.delete(key));
+        ['conversation', 'booking', 'agencyTab', 'trip'].forEach(key => cleanLink.searchParams.delete(key));
         window.history.replaceState({}, '', cleanLink.toString());
-        if (!currentUser) {
+        if (!currentUser && !linkTarget.trip) {
+          // Keep the link so it opens right after the person signs in.
+          pendingDeepLink = linkTarget;
           showToast('Sign in to open this update.');
           openAuthGate('login');
-        } else if (linkedConversation) {
-          openMessagingCenter().then(() => openConversation(linkedConversation)).catch(error => showToast(error.message));
-        } else if (linkedAgencyTab === 'REVIEWS' && currentUser.role === 'AGENCY') {
-          switchPortal('AGENCY');
-          switchAgencyTab('REVIEWS');
-        } else if (linkedBooking && currentUser.role === 'AGENCY') {
-          activeAgencyBookingId = linkedBooking;
-          switchPortal('AGENCY');
-          if (BOOKINGS.some(booking => booking.id === linkedBooking)) viewActiveAgencyBooking();
-        } else if (linkedBooking) {
-          const booking = BOOKINGS.find(entry => entry.id === linkedBooking);
-          openMyTripsModal();
-          const search = document.getElementById('myTripsSearch');
-          if (search && booking?.ref) { search.value = booking.ref; renderMyTrips(); }
+        } else {
+          routeDeepLink(linkTarget);
         }
       }
       const paymentResult = new URLSearchParams(window.location.search).get('payment');

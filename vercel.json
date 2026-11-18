@@ -11,6 +11,12 @@
       "excludeFiles": "{**/data/**,.agents/**,.claude/**,.codex*,android/**,android-web/**,*.pdf,*.jpeg,WhatsApp Image*,all courts.jpg,dalxiis.jpg,hotel 1.jpg,man.jpg,SAFAR.png,tour 1.jpg,ttt.png,change the user traveral*}"
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "0 5 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/",

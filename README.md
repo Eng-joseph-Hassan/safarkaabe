@@ -137,3 +137,27 @@ When WaafiPay confirms a payment, the traveler receives a **Payment confirmed** 
 Signed-in users have a notification center with category and date grouping, read/unread actions, mark-all-read and clear-all controls, per-conversation mute controls, message-sound and category preferences, lock-screen preview privacy, and configurable quiet hours. Opening the notification bell marks notifications as read. Web Push delivery requires `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`, plus browser/device notification permission. Web Push works only on platforms and browsers that support it; iOS requires a supported installed web app, and the Capacitor Android WebView does not include native Firebase push integration. The app-generated message sound only plays while the app is open; operating-system notification sounds are controlled by the device. Booking, confirmation, payment, and review notifications are implemented. Travel-news, promotional, and status category controls are preferences for those notification types if/when generated; those notification feeds are not currently produced by the app. Push and foreground notifications respect quiet hours, muted conversations, category preferences, and lock-screen preview privacy. The app never asks travelers for mobile-wallet SIM PINs; payments use provider-hosted checkout when configured. The Android project is a WebView client, not a native calling application, and no iOS project is included. Live airline, hotel, car, tour, and insurance integrations; supplier-connected ticket issuance or change/refund requests; and separately packaged Windows/macOS desktop applications remain future work. Listings require an agency to add its own inventory; no sample offers are presented as live availability or confirmed supplier offers.
 
 Use HTTPS and secure operational controls before public deployment. Configure database access, backups, monitoring, email verification, password recovery, privacy/retention policies, and the first-admin setup process for your production environment. Do not present sample product/pricing data as live inventory; only describe WaafiPay checkout as available when production provider credentials and the merchant account are configured.
+
+### Refunds
+
+When an agency cancels a booking that was already paid, or a WaafiPay payment arrives after a booking was cancelled, the booking is marked **Refund needed**. The agency sends the money back (EVC Plus, Zaad, Sahal, WaafiPay or bank), then opens the booking and taps **Record refund sent to traveler** with the transaction reference. The traveler gets a notification with the amount and reference, and sees **Refunded** on the booking.
+
+### Waitlist
+
+Travelers can join the waitlist for a sold-out trip from **Saved trips**, or when a booking fails because the seats are gone. When seats open again (a cancellation, an unpaid checkout expiring, or the agency adding seats), everyone waiting is notified. Seats are not held: whoever books first gets them. Booking the trip removes it from the traveler's waitlist.
+
+### Trip reminders
+
+Travelers with a confirmed booking get a notification the day before departure and on the morning of departure. Reminders are sent by the daily Vercel Cron job (`/api/cron/daily`, 05:00 UTC, see `vercel.json`) and also whenever the trip list loads. Set a `CRON_SECRET` environment variable in Vercel so only Vercel can trigger the job.
+
+### Sales reports
+
+Agencies have a **Reports** tab: requests, confirmed bookings, seats sold, sales, online payments and refunds waiting, grouped by trip and by month, for any date range. **Download for Excel** saves the bookings as a CSV file. Super Admins get the same report for all agencies on the admin page.
+
+### Sign-in codes (two-step sign-in)
+
+Any user can turn on **Sign-in code by email** on their profile page (current password required). After that, signing in needs the password and a 6-digit code emailed to them (valid 10 minutes, 5 tries per code, 15 tries per account every 15 minutes). This needs the SMTP settings from *Password reset email*. If email stops working after codes are on, the user can still sign in with the password, and the activity history records it.
+
+### Database backups
+
+Neon keeps a short restore history automatically. For daily copies you control, `.github/workflows/db-backup.yml` runs every night at 03:30 Mogadishu time. It dumps the whole database, encrypts it, and keeps it as a GitHub Actions artifact for 30 days. Add two repository secrets: `DATABASE_URL` (the Neon connection string) and `BACKUP_PASSPHRASE` (a long password; keep it safe, because backups cannot be opened without it). The workflow file has the restore commands.

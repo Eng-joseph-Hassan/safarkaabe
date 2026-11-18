@@ -1,0 +1,62 @@
+name: Daily database backup
+
+# Makes a full, encrypted copy of the production database every day and keeps it for 30 days.
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL       the Neon connection string (the same value Vercel uses)
+#   BACKUP_PASSPHRASE  a long password used to encrypt the backup file - store it somewhere safe
+# To restore: download the artifact, then
+#   gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -d safar-kaabe-db-*.dump.gpg > backup.dump
+#   pg_restore --no-owner --clean --if-exists -d "$TARGET_DATABASE_URL" backup.dump
+
+on:
+  schedule:
+    - cron: '30 0 * * *' # 03:30 in Mogadishu
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check secrets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Add the DATABASE_URL and BACKUP_PASSPHRASE repository secrets to enable backups."
+            exit 1
+          fi
+
+      - name: Install PostgreSQL 18 client (also dumps older servers)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+
+      - name: Dump and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y-%m-%d)
+          /usr/lib/postgresql/18/bin/pg_dump --format=custom --no-owner --no-privileges "$DATABASE_URL" \
+            | gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 --passphrase "$BACKUP_PASSPHRASE" \
+                  -o "safar-kaabe-db-$STAMP.dump.gpg"
+          ls -lh safar-kaabe-db-*.dump.gpg
+
+      - name: Keep backup for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: safar-kaabe-db-backup
+          path: safar-kaabe-db-*.dump.gpg
+          retention-days: 30
+          if-no-files-found: error

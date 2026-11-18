@@ -402,6 +402,25 @@ const schema = `
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, offer_id)
   );
+  CREATE TABLE IF NOT EXISTS trip_waitlist (
+    offer_id TEXT NOT NULL REFERENCES catalog_products(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seat_count INTEGER NOT NULL DEFAULT 1 CHECK (seat_count > 0),
+    created_at TEXT NOT NULL,
+    notified_at TEXT,
+    PRIMARY KEY (offer_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS login_challenges (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_salt TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS trip_waitlist_user_idx ON trip_waitlist(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS login_challenges_user_idx ON login_challenges(user_id);
   CREATE INDEX IF NOT EXISTS chat_status_views_status_idx ON chat_status_views(status_id, viewed_at);
   CREATE INDEX IF NOT EXISTS agency_reviews_agency_idx ON agency_reviews(agency_id, created_at);
   CREATE INDEX IF NOT EXISTS saved_offers_user_idx ON saved_offers(user_id, created_at);
@@ -549,6 +568,8 @@ async function refreshWaafiPayment(referenceId) {
   await audit(null, `WAAFI_PAYMENT_${status}`, `${payment.referenceId} (${payment.amountCents} cents)`);
   if (seatsReleased) publishCatalogChange('availability');
   if (paidAfterCancellation) {
+    await db.prepare("UPDATE bookings SET refund_status = 'NEEDED', updated_at = ? WHERE id = ? AND refund_status IS NULL")
+      .run(nowIso(), payment.bookingId);
     await audit(null, 'PAYMENT_RECEIVED_FOR_CANCELLED_BOOKING', `${payment.bookingReference} (${payment.referenceId})`);
     try {
       await createNotifications((await agencyStaffIds(payment.agencyId)).map(staffId => ({
@@ -602,6 +623,91 @@ async function notifyReleasedPaymentHold(booking, reason) {
     await createNotifications(items);
   } catch (error) {
     console.error('Released-hold notification could not be created:', error.message);
+  }
+}
+
+// ---------- Waitlist: notify travelers when seats open on a sold-out trip ----------
+let waitlistCheckInFlight = null;
+let lastWaitlistCheck = 0;
+function scheduleWaitlistCheck() {
+  if (!waitlistCheckInFlight) {
+    lastWaitlistCheck = Date.now();
+    waitlistCheckInFlight = notifyWaitlistedTravelers()
+      .catch(error => console.error('Waitlist notifications could not be sent:', error.message))
+      .finally(() => { waitlistCheckInFlight = null; });
+  }
+  return waitlistCheckInFlight;
+}
+
+async function notifyWaitlistedTravelers() {
+  const today = new Date().toISOString().slice(0, 10);
+  const ready = await db.prepare(`
+    SELECT w.offer_id AS "offerId", w.user_id AS "userId", w.seat_count AS "seatCount", w.created_at AS "joinedAt",
+           p.title, p.available, p.agency_id AS "agencyId", p.travel_date AS "travelDate"
+    FROM trip_waitlist w
+    JOIN catalog_products p ON p.id = w.offer_id
+    JOIN agencies a ON a.id = p.agency_id
+    WHERE w.notified_at IS NULL AND p.is_published = 1 AND p.available >= w.seat_count
+      AND a.status = 'ACTIVE' AND a.is_approved = 1
+      AND (p.travel_date IS NULL OR p.travel_date >= ?)
+    ORDER BY w.created_at
+    LIMIT 200`).all(today);
+  for (const entry of ready) {
+    const marked = await db.prepare('UPDATE trip_waitlist SET notified_at = ? WHERE offer_id = ? AND user_id = ? AND notified_at IS NULL')
+      .run(nowIso(), entry.offerId, entry.userId);
+    if (marked.changes !== 1) continue;
+    const seats = Number(entry.available);
+    await createNotifications([{
+      recipientUserId: entry.userId, agencyId: entry.agencyId, type: 'WAITLIST_SEATS_OPEN',
+      title: 'Seats are available again',
+      body: `${entry.title}${entry.travelDate ? ` (${entry.travelDate})` : ''} has ${seats} ${seats === 1 ? 'seat' : 'seats'} free now. Book soon – seats go to whoever books first.`,
+      href: `/?trip=${encodeURIComponent(entry.offerId)}`,
+      dedupeKey: `WAITLIST_SEATS_OPEN:${entry.offerId}:${entry.userId}:${entry.joinedAt}`
+    }]);
+  }
+  return ready.length;
+}
+
+// ---------- Trip reminders: the day before and the morning of departure ----------
+let lastTripReminderSweep = 0;
+const tripReminderIntervalMs = process.env.NODE_ENV === 'test' ? 0 : 10 * 60 * 1000;
+async function sendTripReminders({ force = false } = {}) {
+  if (!force && Date.now() - lastTripReminderSweep < tripReminderIntervalMs) return 0;
+  lastTripReminderSweep = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const trips = await db.prepare(`
+    SELECT b.id, b.reference, b.customer_id AS "customerId", b.agency_id AS "agencyId", b.offer_title AS "offerTitle",
+           b.travel_date AS "travelDate", b.seat_count AS "seatCount", a.name AS "agencyName"
+    FROM bookings b JOIN agencies a ON a.id = b.agency_id
+    WHERE b.state = 'ACCEPTED' AND b.customer_id IS NOT NULL AND b.travel_date IN (?, ?)`).all(today, tomorrow);
+  let sent = 0;
+  for (const trip of trips) {
+    const when = trip.travelDate === today ? 'today' : 'tomorrow';
+    const created = await createNotifications([{
+      recipientUserId: trip.customerId, agencyId: trip.agencyId, bookingId: trip.id, type: 'TRIP_REMINDER',
+      title: when === 'today' ? 'Your trip is today' : 'Your trip is tomorrow',
+      body: `${trip.offerTitle} with ${trip.agencyName} is ${when} (${trip.travelDate}). Booking ${trip.reference}, ${trip.seatCount} ${Number(trip.seatCount) === 1 ? 'seat' : 'seats'}. Bring your ID or passport and your booking confirmation.`,
+      href: `/?booking=${encodeURIComponent(trip.id)}`,
+      dedupeKey: `TRIP_REMINDER:${trip.id}:${trip.travelDate}:${when}`
+    }]);
+    sent += created.length;
+  }
+  return sent;
+}
+
+async function runBackgroundSweeps() {
+  const tasks = [
+    ['unpaid checkout holds', () => releaseStalePaymentHolds()],
+    ['trip reminders', () => sendTripReminders()],
+    ['waitlist', () => waitlistCheckInFlight || (Date.now() - lastWaitlistCheck > 30_000 ? scheduleWaitlistCheck() : null)]
+  ];
+  for (const [name, task] of tasks) {
+    try {
+      await task();
+    } catch (error) {
+      console.error(`Background task (${name}) failed:`, error);
+    }
   }
 }
 
@@ -762,7 +868,7 @@ async function initializeDatabase() {
     await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
   }
 
-  const callColumns = [['caller_seen_at', 'TEXT'], ['callee_seen_at', 'TEXT']];
+  const callColumns = [['caller_seen_at', 'TEXT'], ['callee_seen_at', 'TEXT'], ['caller_device', 'TEXT'], ['callee_device', 'TEXT']];
   if (db.isPostgres) {
     for (const [column, definition] of callColumns) {
       await db.exec(`ALTER TABLE chat_calls ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
@@ -773,6 +879,20 @@ async function initializeDatabase() {
       if (!existingCallColumns.has(column)) await db.exec(`ALTER TABLE chat_calls ADD COLUMN ${column} ${definition}`);
     }
   }
+
+  // Columns added for refunds and sign-in codes.
+  const addMissingColumns = async (table, columns) => {
+    if (db.isPostgres) {
+      for (const [column, definition] of columns) await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+      return;
+    }
+    const existing = new Set((await db.prepare(`PRAGMA table_info(${table})`).all()).map(column => column.name));
+    for (const [column, definition] of columns) {
+      if (!existing.has(column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  };
+  await addMissingColumns('bookings', [['refund_status', 'TEXT'], ['refund_reference', 'TEXT'], ['refund_note', 'TEXT'], ['refunded_at', 'TEXT']]);
+  await addMissingColumns('users', [['login_code_enabled', 'INTEGER NOT NULL DEFAULT 0']]);
 
   const preferenceColumns = [
     ['booking_alerts', 'INTEGER NOT NULL DEFAULT 1'],
@@ -859,7 +979,8 @@ const publicUser = user => ({
   avatarMime: user.avatar_mime || null,
   avatarData: user.avatar_data || null,
   presenceStatus: user.presence_status || 'AVAILABLE',
-  lastSeenAt: user.last_seen_at || null
+  lastSeenAt: user.last_seen_at || null,
+  loginCodeEnabled: Number(user.login_code_enabled || 0) === 1
 });
 
 const agencyRatingColumns = agencyIdExpression => `
@@ -910,7 +1031,8 @@ async function statusContactKeys(user) {
 
 function canViewChatStatus(user, status, contactKeys, blocks = null) {
   if (status.userId === user.id) return true;
-  if (blocks && (blocks.blockedKeys.has(chatStatusOwnerKey(status)) || blocks.blockerIds.has(status.userId))) return false;
+  if (blocks && (blocks.blockedKeys.has(chatStatusOwnerKey(status)) || blocks.blockerIds.has(status.userId) ||
+    blocks.blockerKeys?.has(chatStatusOwnerKey(status)))) return false;
   if ((status.audience || 'EVERYONE') === 'EVERYONE') return true;
   return contactKeys.has(chatStatusOwnerKey(status));
 }
@@ -930,6 +1052,10 @@ async function getVisibleChatStatus(statusId, user) {
 // ---------- blocking ----------
 // A block is stored against a "party": one traveler (USER:id), one agency (AGENCY:id, covering all its
 // staff) or SAFAR KAABE support (ADMIN). Blocking stops messages, calls and status visibility both ways.
+// When a connected call is closed by the abandoned-call cleanup, it ended when the first side stopped checking in.
+const callLastSeenSql = `CASE WHEN COALESCE(caller_seen_at, accepted_at, created_at) < COALESCE(callee_seen_at, accepted_at, created_at)
+  THEN COALESCE(caller_seen_at, accepted_at, created_at) ELSE COALESCE(callee_seen_at, accepted_at, created_at) END`;
+
 function partyKeyForUser(user) {
   const role = user.role || user.userRole;
   if (role === 'SUPER_ADMIN') return 'ADMIN';
@@ -950,15 +1076,27 @@ async function partyMemberIds(key) {
   return [];
 }
 
+// Everyone who shares this user's party: a block by one agency staff member applies to the whole agency.
+async function myPartyIds(user) {
+  const ids = await partyMemberIds(partyKeyForUser(user));
+  return ids.length ? ids : [user.id];
+}
+
 async function blockStateForUser(user) {
-  const blockedKeys = new Set((await db.prepare('SELECT blocked_key AS "blockedKey" FROM blocked_parties WHERE blocker_id = ?').all(user.id)).map(row => row.blockedKey));
-  const blockerIds = new Set((await db.prepare('SELECT blocker_id AS "blockerId" FROM blocked_parties WHERE blocked_key = ?').all(partyKeyForUser(user))).map(row => row.blockerId));
-  return { blockedKeys, blockerIds };
+  const party = await myPartyIds(user);
+  const placeholders = party.map(() => '?').join(', ');
+  const blockedKeys = new Set((await db.prepare(`SELECT blocked_key AS "blockedKey" FROM blocked_parties WHERE blocker_id IN (${placeholders})`)
+    .all(...party)).map(row => row.blockedKey));
+  const blockers = await db.prepare(`SELECT users.id, users.role, users.agency_id FROM blocked_parties
+    JOIN users ON users.id = blocked_parties.blocker_id WHERE blocked_parties.blocked_key = ?`).all(partyKeyForUser(user));
+  return { blockedKeys, blockerIds: new Set(blockers.map(row => row.id)), blockerKeys: new Set(blockers.map(row => partyKeyForUser(row))) };
 }
 
 // Returns 'BLOCKED_BY_ME', 'BLOCKED_BY_THEM' or null for messages/calls from user to the party peerKey.
 async function blockBetween(user, peerKey) {
-  if (await db.prepare('SELECT 1 AS present FROM blocked_parties WHERE blocker_id = ? AND blocked_key = ?').get(user.id, peerKey)) return 'BLOCKED_BY_ME';
+  const party = await myPartyIds(user);
+  if (await db.prepare(`SELECT 1 AS present FROM blocked_parties WHERE blocked_key = ? AND blocker_id IN (${party.map(() => '?').join(', ')}) LIMIT 1`)
+    .get(peerKey, ...party)) return 'BLOCKED_BY_ME';
   const members = await partyMemberIds(peerKey);
   if (!members.length) return null;
   const placeholders = members.map(() => '?').join(', ');
@@ -1066,6 +1204,8 @@ function sendCatalogImage(response, image) {
 }
 
 function publishCatalogChange(change = 'updated') {
+  // Seats may have opened up: tell travelers on the waitlist.
+  if (change === 'availability' || change === 'updated') scheduleWaitlistCheck();
   if (!catalogEventSubscribers.size) return;
   const event = `event: offers\ndata: ${JSON.stringify({ change, updatedAt: nowIso() })}\n\n`;
   for (const response of catalogEventSubscribers) {
@@ -2031,6 +2171,22 @@ function passwordResetTransport() {
   });
 }
 
+const loginCodeTtlMs = 10 * 60 * 1000;
+const loginCodeAttemptsLimit = 5;
+function loginCodesAvailable() {
+  try {
+    return Boolean(passwordResetTransport());
+  } catch {
+    return false;
+  }
+}
+
+function maskEmail(email) {
+  const [name, domain] = String(email || '').split('@');
+  if (!domain) return '';
+  return `${name.slice(0, 2)}${'•'.repeat(Math.max(1, Math.min(6, name.length - 2)))}@${domain}`;
+}
+
 async function allowRateLimitRequest(key, windowMs, limit) {
   const now = Date.now();
   const updated = await db.prepare(`
@@ -2041,6 +2197,18 @@ async function allowRateLimitRequest(key, windowMs, limit) {
     RETURNING attempts
   `).get(key, now + windowMs, now, now, now + windowMs);
   return updated.attempts <= limit;
+}
+
+function nextIsoDate(isoDate) {
+  return new Date(Date.parse(`${isoDate}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+}
+
+// CSV cell with quoting; a leading = + - @ is neutralised so spreadsheet apps do not run it as a formula.
+function csvCell(value) {
+  let text = value === null || value === undefined ? '' : String(value);
+  // Plain numbers such as +252 61 234 5678 or -5 are safe and stay unchanged.
+  if (/^[=+\-@\t\r]/.test(text) && !/^[+-]?[\d\s().-]+$/.test(text)) text = `'${text}`;
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function clientIp(request) {
@@ -2107,12 +2275,19 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  if (method === 'GET' && pathname === '/api/catalog') {
-    try {
-      await releaseStalePaymentHolds();
-    } catch (error) {
-      console.error('Unable to release unpaid checkout holds:', error);
+  if (method === 'GET' && pathname === '/api/catalog') await runBackgroundSweeps();
+
+  // Daily job (Vercel Cron). Safe to run more than once: every task skips work already done.
+  if (method === 'GET' && pathname === '/api/cron/daily') {
+    const secret = process.env.CRON_SECRET;
+    if (secret && !safeEqual(request.headers.authorization || '', `Bearer ${secret}`)) {
+      sendJson(response, 401, { error: 'Not allowed.' });
+      return;
     }
+    await runBackgroundSweeps();
+    const reminders = await sendTripReminders({ force: true });
+    sendJson(response, 200, { ok: true, remindersSent: reminders });
+    return;
   }
 
   if (!user && method === 'GET' && pathname === '/api/catalog') {
@@ -2452,14 +2627,122 @@ async function handleApi(request, response, url) {
       sendJson(response, 403, { error: 'This agency account is pending approval or suspended. Contact SAFAR KAABE support.' });
       return;
     }
+    if (Number(account.login_code_enabled || 0) === 1) {
+      let transport = null;
+      try {
+        transport = passwordResetTransport();
+      } catch (error) {
+        console.error('Sign-in code email settings are invalid.', error);
+      }
+      if (transport) {
+        const code = String(crypto.randomInt(100000, 1000000));
+        const credentials = await hashPassword(code);
+        const challengeToken = crypto.randomBytes(24).toString('base64url');
+        const createdAt = Date.now();
+        await db.prepare('DELETE FROM login_challenges WHERE user_id = ? OR expires_at < ?').run(account.id, createdAt);
+        await db.prepare(`INSERT INTO login_challenges (id, user_id, code_salt, code_hash, expires_at, attempts, created_at)
+          VALUES (?, ?, ?, ?, ?, 0, ?)`).run(crypto.createHash('sha256').update(challengeToken).digest('hex'), account.id,
+          credentials.salt, credentials.hash, createdAt + loginCodeTtlMs, createdAt);
+        try {
+          await transport.sendMail({
+            from: passwordResetSender,
+            to: account.email,
+            subject: 'Your SAFAR KAABE sign-in code',
+            text: `Your SAFAR KAABE sign-in code is ${code}. It expires in 10 minutes. If you did not just try to sign in, change your password now.`,
+            html: `<p>Your SAFAR KAABE sign-in code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes. If you did not just try to sign in, change your password now.</p>`
+          });
+        } catch (error) {
+          await db.prepare('DELETE FROM login_challenges WHERE user_id = ?').run(account.id);
+          console.error('Unable to deliver sign-in code email.', error);
+          sendJson(response, 503, { error: 'We could not email your sign-in code. Try again in a few minutes.' });
+          return;
+        }
+        sendJson(response, 200, { loginCodeRequired: true, challengeId: challengeToken, emailHint: maskEmail(account.email) });
+        return;
+      }
+      // Email stopped working after the code was turned on: let the owner in rather than lock them out, but record it.
+      console.error(`Sign-in code skipped for ${account.email}: SMTP is not configured.`);
+      await audit(account.id, 'LOGIN_CODE_SKIPPED', account.email);
+    }
     await createSession(account, response);
     await audit(account.id, 'AUTHENTICATED', account.email);
     sendJson(response, 200, { user: publicUser(account) });
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/auth/login/verify') {
+    const body = await readJson(request);
+    const challengeToken = requireString(body.challengeId, 'Sign-in request', 200);
+    const code = String(body.code ?? '').replace(/\s+/g, '');
+    const challengeId = crypto.createHash('sha256').update(challengeToken).digest('hex');
+    const challenge = await db.prepare('SELECT * FROM login_challenges WHERE id = ?').get(challengeId);
+    if (!challenge || challenge.expires_at < Date.now()) {
+      if (challenge) await db.prepare('DELETE FROM login_challenges WHERE id = ?').run(challengeId);
+      sendJson(response, 400, { error: 'This code has expired. Sign in again to get a new code.' });
+      return;
+    }
+    const counted = await db.prepare('UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ? RETURNING attempts').get(challengeId);
+    // Also cap guesses per account, so asking for new codes again and again does not allow unlimited guessing.
+    const accountAllowed = await allowRateLimitRequest(`login-code:${challenge.user_id}`, 15 * 60 * 1000, 15);
+    if (!accountAllowed) {
+      await db.prepare('DELETE FROM login_challenges WHERE user_id = ?').run(challenge.user_id);
+      sendJson(response, 429, { error: 'Too many sign-in attempts. Wait 15 minutes and try again.' }, { 'Retry-After': '900' });
+      return;
+    }
+    if (!counted || counted.attempts > loginCodeAttemptsLimit) {
+      await db.prepare('DELETE FROM login_challenges WHERE id = ?').run(challengeId);
+      sendJson(response, 429, { error: 'Too many wrong codes. Sign in again to get a new code.' });
+      return;
+    }
+    const supplied = /^\d{6}$/.test(code) ? await hashPassword(code, challenge.code_salt) : null;
+    if (!supplied || !safeEqual(supplied.hash, challenge.code_hash)) {
+      sendJson(response, 400, { error: 'That code is not correct. Check the email and try again.' });
+      return;
+    }
+    await db.prepare('DELETE FROM login_challenges WHERE id = ?').run(challengeId);
+    const account = await db.prepare('SELECT * FROM users WHERE id = ?').get(challenge.user_id);
+    if (!account) {
+      sendJson(response, 400, { error: 'This code has expired. Sign in again to get a new code.' });
+      return;
+    }
+    if (account.role === 'AGENCY' &&
+        !await db.prepare("SELECT id FROM agencies WHERE id = ? AND status = 'ACTIVE' AND is_approved = 1").get(account.agency_id)) {
+      sendJson(response, 403, { error: 'This agency account is pending approval or suspended. Contact SAFAR KAABE support.' });
+      return;
+    }
+    await createSession(account, response);
+    await audit(account.id, 'AUTHENTICATED', `${account.email} (with sign-in code)`);
+    sendJson(response, 200, { user: publicUser(account) });
+    return;
+  }
+
+  if (method === 'PATCH' && pathname === '/api/auth/login-code') {
+    if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
+    if (!authorizeMutation(request, response, session)) return;
+    const body = await readJson(request);
+    if (typeof body.enabled !== 'boolean') {
+      sendJson(response, 400, { error: 'Choose whether to turn sign-in codes on or off.' });
+      return;
+    }
+    const password = requireString(body.password, 'Current password', 256);
+    const credentials = await hashPassword(password, user.password_salt);
+    if (!safeEqual(credentials.hash, user.password_hash)) {
+      sendJson(response, 400, { error: 'Your current password is not correct.' });
+      return;
+    }
+    if (body.enabled && !loginCodesAvailable()) {
+      sendJson(response, 503, { error: 'Sign-in codes need email sending to be set up on the server first. Contact SAFAR KAABE support.' });
+      return;
+    }
+    await db.prepare('UPDATE users SET login_code_enabled = ? WHERE id = ?').run(body.enabled ? 1 : 0, user.id);
+    await audit(user.id, body.enabled ? 'LOGIN_CODES_ENABLED' : 'LOGIN_CODES_DISABLED', user.email);
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    sendJson(response, 200, { user: publicUser(updated) });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/auth/session') {
-    sendJson(response, 200, { user: user ? publicUser(user) : null });
+    sendJson(response, 200, { user: user ? publicUser(user) : null, loginCodesAvailable: loginCodesAvailable() });
     return;
   }
 
@@ -3166,6 +3449,16 @@ async function handleApi(request, response, url) {
         if (key === partyKeyForUser(user)) { sendJson(response, 400, { error: 'You cannot block yourself.' }); return; }
         await db.prepare('INSERT INTO blocked_parties (blocker_id, blocked_key, created_at) VALUES (?, ?, ?) ON CONFLICT (blocker_id, blocked_key) DO NOTHING')
           .run(user.id, key, nowIso());
+        // Hang up any call that is ringing or connected between the two sides.
+        const mine = await myPartyIds(user);
+        const theirs = await partyMemberIds(key);
+        if (theirs.length) {
+          const minePh = mine.map(() => '?').join(', ');
+          const theirsPh = theirs.map(() => '?').join(', ');
+          await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE status IN ('RINGING', 'ACCEPTED')
+            AND ((caller_id IN (${minePh}) AND callee_id IN (${theirsPh})) OR (caller_id IN (${theirsPh}) AND callee_id IN (${minePh})))`)
+            .run(nowIso(), ...mine, ...theirs, ...theirs, ...mine);
+        }
         await audit(user.id, 'CONTACT_BLOCKED', key);
         sendJson(response, 200, { ok: true, key });
         return;
@@ -3173,12 +3466,15 @@ async function handleApi(request, response, url) {
       if (method === 'DELETE') {
         const body = await readJson(request);
         const key = requireString(body.key, 'Blocked contact', 120);
-        await db.prepare('DELETE FROM blocked_parties WHERE blocker_id = ? AND blocked_key = ?').run(user.id, key);
+        const party = await myPartyIds(user);
+        await db.prepare(`DELETE FROM blocked_parties WHERE blocked_key = ? AND blocker_id IN (${party.map(() => '?').join(', ')})`).run(key, ...party);
         await audit(user.id, 'CONTACT_UNBLOCKED', key);
         sendJson(response, 200, { ok: true });
         return;
       }
-      const rows = await db.prepare('SELECT blocked_key AS "key", created_at AS "createdAt" FROM blocked_parties WHERE blocker_id = ? ORDER BY created_at DESC').all(user.id);
+      const party = await myPartyIds(user);
+      const rows = await db.prepare(`SELECT blocked_key AS "key", MIN(created_at) AS "createdAt" FROM blocked_parties
+        WHERE blocker_id IN (${party.map(() => '?').join(', ')}) GROUP BY blocked_key ORDER BY MIN(created_at) DESC`).all(...party);
       const blocks = [];
       for (const row of rows) {
         let name = 'SAFAR KAABE support';
@@ -3494,17 +3790,30 @@ async function handleApi(request, response, url) {
         return;
       }
       const staleCallBefore = new Date(Date.now() - 90_000).toISOString();
-      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE status = 'ACCEPTED'
+      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ${callLastSeenSql} WHERE status = 'ACCEPTED'
         AND (caller_id IN (?, ?) OR callee_id IN (?, ?))
         AND (COALESCE(caller_seen_at, accepted_at, created_at) < ? OR COALESCE(callee_seen_at, accepted_at, created_at) < ?)`)
-        .run(nowIso(), user.id, callee.id, user.id, callee.id, staleCallBefore, staleCallBefore);
-      const busy = await db.prepare(`SELECT id FROM chat_calls WHERE status IN ('RINGING', 'ACCEPTED')
-        AND (caller_id IN (?, ?) OR callee_id IN (?, ?)) LIMIT 1`).get(user.id, callee.id, user.id, callee.id);
-      if (busy) { sendJson(response, 409, { error: 'This participant is already in another call. Try again shortly.' }); return; }
+        .run(user.id, callee.id, user.id, callee.id, staleCallBefore, staleCallBefore);
+      const busyQuery = `SELECT id, created_at AS "createdAt" FROM chat_calls WHERE status IN ('RINGING', 'ACCEPTED')
+        AND (caller_id IN (?, ?) OR callee_id IN (?, ?))`;
+      if (await db.prepare(`${busyQuery} LIMIT 1`).get(user.id, callee.id, user.id, callee.id)) {
+        sendJson(response, 409, { error: 'This participant is already in another call. Try again shortly.' });
+        return;
+      }
       const callId = crypto.randomUUID();
       const createdAt = nowIso();
-      await db.prepare(`INSERT INTO chat_calls (id, conversation_id, caller_id, callee_id, call_type, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'RINGING', ?)`).run(callId, conversation.id, user.id, callee.id, callType, createdAt);
+      const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : null;
+      await db.prepare(`INSERT INTO chat_calls (id, conversation_id, caller_id, callee_id, call_type, status, created_at, caller_device)
+        VALUES (?, ?, ?, ?, ?, 'RINGING', ?, ?)`).run(callId, conversation.id, user.id, callee.id, callType, createdAt, deviceId);
+      // Two people may call the same person at the same moment. Both inserts are now visible, so keep only
+      // the earliest call and withdraw this one if another call got there first.
+      const competing = (await db.prepare(busyQuery).all(user.id, callee.id, user.id, callee.id))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      if (competing.length > 1 && competing[0].id !== callId) {
+        await db.prepare('DELETE FROM chat_calls WHERE id = ?').run(callId);
+        sendJson(response, 409, { error: 'This participant is already in another call. Try again shortly.' });
+        return;
+      }
       try {
         await createNotifications([{
           recipientUserId: callee.id, agencyId: conversation.agency_id, conversationId: conversation.id, type: 'CALL_INCOMING',
@@ -3568,18 +3877,19 @@ async function handleApi(request, response, url) {
       // A call whose participant closed the app without hanging up would block both people
       // from new calls. End connected calls when either side has not checked in for 90 seconds.
       const abandonedBefore = new Date(Date.now() - 90_000).toISOString();
-      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE status = 'ACCEPTED'
+      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ${callLastSeenSql} WHERE status = 'ACCEPTED'
         AND (COALESCE(caller_seen_at, accepted_at, created_at) < ? OR COALESCE(callee_seen_at, accepted_at, created_at) < ?)`)
-        .run(now, abandonedBefore, abandonedBefore);
+        .run(abandonedBefore, abandonedBefore);
       const calls = await db.prepare(`SELECT calls.id, calls.conversation_id AS conversationId,
         calls.caller_id AS callerId, caller.name AS callerName, caller.avatar_mime AS callerAvatarMime,
         caller.avatar_data AS callerAvatarData, calls.callee_id AS calleeId, callee.name AS calleeName,
         callee.avatar_mime AS calleeAvatarMime, callee.avatar_data AS calleeAvatarData,
-        calls.call_type AS callType, calls.status, calls.created_at AS createdAt
+        calls.call_type AS callType, calls.status, calls.created_at AS createdAt,
+        CASE WHEN calls.caller_id = ? THEN calls.caller_device ELSE calls.callee_device END AS myDeviceId
         FROM chat_calls calls JOIN users caller ON caller.id = calls.caller_id
         JOIN users callee ON callee.id = calls.callee_id
         WHERE (calls.caller_id = ? OR calls.callee_id = ?) AND calls.status IN ('RINGING', 'ACCEPTED')
-        ORDER BY calls.created_at DESC LIMIT 10`).all(user.id, user.id);
+        ORDER BY calls.created_at DESC LIMIT 10`).all(user.id, user.id, user.id);
       sendJson(response, 200, { calls: calls.map(call => ({ ...call,
         peerName: call.callerId === user.id ? call.calleeName : call.callerName,
         peerAvatarMime: call.callerId === user.id ? call.calleeAvatarMime : call.callerAvatarMime,
@@ -3605,6 +3915,11 @@ async function handleApi(request, response, url) {
         return;
       }
       if (!['RINGING', 'ACCEPTED'].includes(call.status)) { sendJson(response, 409, { error: 'This call has already ended.' }); return; }
+      if (await isBlockedBetween(call.caller_id, call.callee_id)) {
+        await db.prepare("UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status IN ('RINGING', 'ACCEPTED')").run(nowIso(), call.id);
+        sendJson(response, 403, { error: 'This call was ended because one of you has blocked the other.' });
+        return;
+      }
       const body = await readJson(request, 32_768);
       const signalType = typeof body.signalType === 'string' ? body.signalType.toUpperCase() : '';
       const allowedSignal = signalType === 'ICE' || (signalType === 'OFFER' && user.id === call.caller_id) ||
@@ -3627,11 +3942,35 @@ async function handleApi(request, response, url) {
       const body = await readJson(request);
       const action = typeof body.action === 'string' ? body.action.toUpperCase() : '';
       if (action === 'ACCEPT' && call.callee_id === user.id && call.status === 'RINGING') {
-        await db.prepare("UPDATE chat_calls SET status = 'ACCEPTED', accepted_at = ? WHERE id = ? AND status = 'RINGING'").run(nowIso(), call.id);
+        if (await isBlockedBetween(call.caller_id, call.callee_id)) {
+          await db.prepare("UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status = 'RINGING'").run(nowIso(), call.id);
+          sendJson(response, 403, { error: 'This call was ended because one of you has blocked the other.' });
+          return;
+        }
+        const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : null;
+        await db.prepare("UPDATE chat_calls SET status = 'ACCEPTED', accepted_at = ?, callee_device = ? WHERE id = ? AND status = 'RINGING'")
+          .run(nowIso(), deviceId, call.id);
       } else if (action === 'REJECT' && call.callee_id === user.id && call.status === 'RINGING') {
         await db.prepare("UPDATE chat_calls SET status = 'REJECTED', ended_at = ? WHERE id = ? AND status = 'RINGING'").run(nowIso(), call.id);
-      } else if (action === 'END' && ['RINGING', 'ACCEPTED'].includes(call.status)) {
-        await db.prepare("UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status IN ('RINGING', 'ACCEPTED')").run(nowIso(), call.id);
+      } else if (action === 'END' && call.status === 'RINGING') {
+        // Hanging up before an answer: for the caller it is a missed call for the other person; for the callee it is a decline.
+        const endedStatus = call.caller_id === user.id ? 'MISSED' : 'REJECTED';
+        const ended = await db.prepare(`UPDATE chat_calls SET status = ?, ended_at = ? WHERE id = ? AND status = 'RINGING'
+          RETURNING id`).get(endedStatus, nowIso(), call.id);
+        if (ended && endedStatus === 'MISSED') {
+          try {
+            await createNotifications([{
+              recipientUserId: call.callee_id, conversationId: call.conversation_id, type: 'CALL_MISSED',
+              title: `Missed ${call.call_type === 'VIDEO' ? 'video' : 'voice'} call`,
+              body: `You missed a call from ${user.name}. Open the chat to call back.`,
+              href: `/?conversation=${encodeURIComponent(call.conversation_id)}`, dedupeKey: `CALL_MISSED:${call.id}`
+            }]);
+          } catch (error) {
+            console.error('Missed call notification could not be created:', error.message);
+          }
+        }
+      } else if (action === 'END' && call.status === 'ACCEPTED') {
+        await db.prepare("UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status = 'ACCEPTED'").run(nowIso(), call.id);
       } else if (action !== 'ACCEPT' && action !== 'REJECT' && action !== 'END') {
         sendJson(response, 400, { error: 'Choose answer, decline, or end call.' }); return;
       } else if (!['RINGING', 'ACCEPTED'].includes(call.status)) {
@@ -3680,6 +4019,10 @@ async function handleApi(request, response, url) {
       }
       if (existing.senderId !== user.id) {
         sendJson(response, 403, { error: 'You can only change messages you sent.' });
+        return;
+      }
+      if (method === 'PATCH' && await blockBetween(user, conversationPeerKey(conversation, user))) {
+        sendJson(response, 403, { error: 'You cannot edit messages in this chat because one of you has blocked the other.' });
         return;
       }
       if (await db.prepare('SELECT payment_reference FROM payment_receipt_messages WHERE message_id = ?').get(existing.id)) {
@@ -3878,6 +4221,8 @@ async function handleApi(request, response, url) {
                a.name AS agencyName,
                CASE WHEN p.is_published = 1 AND p.available > 0 AND a.status = 'ACTIVE' AND a.is_approved = 1
                  AND (p.travel_date IS NULL OR p.travel_date >= date('now')) THEN 1 ELSE 0 END AS bookable,
+               CASE WHEN p.is_published = 1 AND p.available <= 0 AND a.status = 'ACTIVE' AND a.is_approved = 1
+                 AND (p.travel_date IS NULL OR p.travel_date >= date('now')) THEN 1 ELSE 0 END AS soldOut,
                ${agencyRatingColumns('p.agency_id')}
         FROM saved_offers s
         JOIN catalog_products p ON p.id = s.offer_id
@@ -3885,14 +4230,69 @@ async function handleApi(request, response, url) {
         WHERE s.user_id = ?
         ORDER BY s.created_at DESC
       `).all(user.id);
+      const waitlisted = new Set((await db.prepare('SELECT offer_id AS "offerId" FROM trip_waitlist WHERE user_id = ?').all(user.id)).map(row => row.offerId));
       sendJson(response, 200, {
         savedOffers: saved.map(record => {
           const bookable = Number(record.bookable) === 1;
-          if (bookable) return { ...normalizeAgencyRating(record), bookable: true };
+          if (bookable) return { ...normalizeAgencyRating(record), bookable: true, waitlisted: waitlisted.has(record.id) };
           return { offerId: record.offerId, savedAt: record.savedAt, id: record.id, titleEn: record.titleEn, titleSo: record.titleSo,
-            agencyId: record.agencyId, agencyName: record.agencyName, bookable: false };
+            agencyId: record.agencyId, agencyName: record.agencyName, bookable: false,
+            soldOut: Number(record.soldOut) === 1, travelDate: record.soldOut ? record.travelDate : undefined,
+            waitlisted: waitlisted.has(record.id) };
         })
       });
+      return;
+    }
+
+    if (pathname === '/api/waitlist' && method === 'GET') {
+      if (!requireRole(response, user, ['CLIENT'])) return;
+      const entries = await db.prepare(`
+        SELECT w.offer_id AS "offerId", w.seat_count AS "seatCount", w.created_at AS "joinedAt", w.notified_at AS "notifiedAt",
+               p.title, p.travel_date AS "travelDate", p.available, a.name AS "agencyName"
+        FROM trip_waitlist w JOIN catalog_products p ON p.id = w.offer_id JOIN agencies a ON a.id = p.agency_id
+        WHERE w.user_id = ? ORDER BY w.created_at DESC`).all(user.id);
+      sendJson(response, 200, { waitlist: entries });
+      return;
+    }
+
+    const waitlistMatch = pathname.match(/^\/api\/offers\/([0-9a-z_-]+)\/waitlist$/i);
+    if (waitlistMatch && ['POST', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, ['CLIENT'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const offerId = waitlistMatch[1];
+      if (method === 'DELETE') {
+        await db.prepare('DELETE FROM trip_waitlist WHERE offer_id = ? AND user_id = ?').run(offerId, user.id);
+        sendJson(response, 200, { ok: true, waitlisted: false, message: 'You left the waitlist for this trip.' });
+        return;
+      }
+      const body = await readJson(request);
+      const seatCount = body.seatCount === undefined ? 1 : Number(body.seatCount);
+      if (!Number.isSafeInteger(seatCount) || seatCount < 1 || seatCount > 50) {
+        sendJson(response, 400, { error: 'Choose between 1 and 50 seats.' });
+        return;
+      }
+      const offer = await db.prepare(`SELECT p.id, p.title, p.available FROM catalog_products p JOIN agencies a ON a.id = p.agency_id
+        WHERE p.id = ? AND p.is_published = 1 AND a.status = 'ACTIVE' AND a.is_approved = 1
+          AND (p.travel_date IS NULL OR p.travel_date >= ?)`).get(offerId, new Date().toISOString().slice(0, 10));
+      if (!offer) {
+        sendJson(response, 404, { error: 'This trip is no longer offered, so you cannot join its waitlist.' });
+        return;
+      }
+      if (Number(offer.available) >= seatCount) {
+        sendJson(response, 409, { error: `${offer.available} ${Number(offer.available) === 1 ? 'seat is' : 'seats are'} available now. Book the trip instead of joining the waitlist.`, available: Number(offer.available) });
+        return;
+      }
+      const waitlistCount = await db.prepare('SELECT COUNT(*) AS "count" FROM trip_waitlist WHERE user_id = ?').get(user.id);
+      const already = await db.prepare('SELECT 1 AS present FROM trip_waitlist WHERE offer_id = ? AND user_id = ?').get(offer.id, user.id);
+      if (!already && Number(waitlistCount?.count || 0) >= 50) {
+        sendJson(response, 409, { error: 'You can wait for up to 50 trips at once. Leave some waitlists first.' });
+        return;
+      }
+      await db.prepare(`INSERT INTO trip_waitlist (offer_id, user_id, seat_count, created_at, notified_at) VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT (offer_id, user_id) DO UPDATE SET seat_count = excluded.seat_count, created_at = excluded.created_at, notified_at = NULL`)
+        .run(offer.id, user.id, seatCount, nowIso());
+      sendJson(response, 200, { ok: true, waitlisted: true,
+        message: `You are on the waitlist for ${offer.title}. We will notify you when ${seatCount === 1 ? 'a seat opens' : `${seatCount} seats open`}.` });
       return;
     }
 
@@ -4169,6 +4569,9 @@ async function handleApi(request, response, url) {
         cancellation_reason AS cancellationReason, customer_id AS customerId, traveler_name AS travelerName, traveler_email AS travelerEmail, phone,
         offer_title AS offerTitle, category, payment_provider AS paymentProvider, state, financials_json,
         seat_count AS seatCount, travel_date AS travelDate, created_at AS createdAtUtc, updated_at AS updatedAtUtc,
+        refund_status AS refundStatus, refund_reference AS refundReference, refund_note AS refundNote, refunded_at AS refundedAt,
+        (SELECT amount_cents FROM waafi_payments WHERE booking_id = bookings.id) AS paymentAmountCents,
+        (SELECT currency FROM waafi_payments WHERE booking_id = bookings.id) AS paymentCurrency,
         (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus,
         (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId,
         (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference
@@ -4352,8 +4755,39 @@ async function handleApi(request, response, url) {
           }
           await audit(user.id, 'BOOKING_REQUEST_RESTORED', `${existing.ref} (${existing.agencyId})`);
           if (existing.offerId) publishCatalogChange('availability');
+        } else if (body.action === 'MARK_REFUNDED') {
+          if (existing.refundStatus !== 'NEEDED') {
+            sendJson(response, 409, { error: 'This booking has no refund waiting to be sent.' });
+            return;
+          }
+          const refundReference = requireString(body.refundReference, 'Refund reference', 80);
+          const refundNote = typeof body.refundNote === 'string' ? body.refundNote.trim().replace(/\s+/g, ' ').slice(0, 300) : '';
+          const refundedAt = nowIso();
+          const refunded = await db.prepare(`UPDATE bookings SET refund_status = 'REFUNDED', refund_reference = ?, refund_note = ?, refunded_at = ?, updated_at = ?
+            WHERE id = ? AND agency_id = ? AND refund_status = 'NEEDED'`)
+            .run(refundReference, refundNote || null, refundedAt, refundedAt, bookingId, existing.agencyId);
+          if (refunded.changes !== 1) {
+            sendJson(response, 409, { error: 'This refund was already recorded. Refresh the bookings list.' });
+            return;
+          }
+          await audit(user.id, 'BOOKING_REFUND_RECORDED', `${existing.ref} (${existing.agencyId}): ${refundReference}`);
+          if (existing.customerId) {
+            const financials = JSON.parse(existing.financials_json || '{}');
+            const amountCents = existing.paymentAmountCents ?? financials.customerGrandTotalCents;
+            const amount = Number.isFinite(Number(amountCents)) ? `${(Number(amountCents) / 100).toFixed(2)} ${existing.paymentCurrency || 'USD'}` : 'your payment';
+            try {
+              await createNotifications([{
+                recipientUserId: existing.customerId, agencyId: existing.agencyId, bookingId, type: 'PAYMENT_REFUNDED',
+                title: 'Your refund was sent',
+                body: `The agency sent back ${amount} for booking ${existing.ref} (${existing.offerTitle}). Refund reference: ${refundReference}.${refundNote ? ` Note: ${refundNote}` : ''}`,
+                href: `/?booking=${encodeURIComponent(bookingId)}`, dedupeKey: `PAYMENT_REFUNDED:${bookingId}`
+              }]);
+            } catch (error) {
+              console.error('Refund notification could not be created:', error.message);
+            }
+          }
         } else {
-          sendJson(response, 400, { error: 'Choose accept, undo acceptance, edit, reject, or restore this booking request.' });
+          sendJson(response, 400, { error: 'Choose accept, undo acceptance, edit, reject, restore, or record a refund for this booking.' });
           return;
         }
 
@@ -4412,11 +4846,12 @@ async function handleApi(request, response, url) {
         return;
       }
       const canceled = await runInTransaction(async () => {
-        const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?
+        const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?,
+            refund_status = CASE WHEN ? = 1 THEN 'NEEDED' ELSE refund_status END
           WHERE id = ? AND agency_id = ? AND state = ? AND payment_provider = ?
             AND (? = 1 OR NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED'))
           RETURNING seat_count AS seatCount`)
-          .get(reason, nowIso(), bookingId, existing.agencyId, existing.state, existing.paymentProvider, paymentReceived ? 1 : 0);
+          .get(reason, nowIso(), paymentReceived ? 1 : 0, bookingId, existing.agencyId, existing.state, existing.paymentProvider, paymentReceived ? 1 : 0);
         if (!canceledBooking) return null;
         let available = null;
         if (returnSeats) {
@@ -4437,10 +4872,85 @@ async function handleApi(request, response, url) {
       if (canceled.seatsReturned) publishCatalogChange('availability');
       const message = canceled.paymentNeedsRefund
         ? canceled.seatsReturned
-          ? 'Booking canceled and seats returned. Any payment refund must be handled separately.'
-          : 'Booking canceled. Payment was not refunded, and the seats remain reserved.'
+          ? 'Booking canceled and seats returned. Send the refund to the traveler, then tap "Record refund" on this booking.'
+          : 'Booking canceled and the seats stay reserved. Send the refund to the traveler, then tap "Record refund" on this booking.'
         : 'Request canceled. Its seats are available again.';
       sendJson(response, 200, { ok: true, message, ...canceled });
+      return;
+    }
+
+    if (pathname === '/api/reports/sales' && method === 'GET') {
+      if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY'])) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const defaultFrom = new Date(Date.now() - 89 * 86_400_000).toISOString().slice(0, 10);
+      const from = url.searchParams.get('from') || defaultFrom;
+      const to = url.searchParams.get('to') || today;
+      if (!isValidIsoDate(from) || !isValidIsoDate(to) || from > to) {
+        sendJson(response, 400, { error: 'Choose a valid start and end date. The start date must be before the end date.' });
+        return;
+      }
+      const agencyFilter = user.role === 'AGENCY' ? user.agency_id : (url.searchParams.get('agencyId') || null);
+      const rows = await db.prepare(`
+        SELECT b.reference, b.created_at AS "createdAt", b.travel_date AS "travelDate", b.offer_title AS "offerTitle",
+               b.category, b.traveler_name AS "travelerName", b.phone, b.seat_count AS "seatCount", b.state,
+               b.payment_provider AS "paymentProvider", b.financials_json AS "financialsJson",
+               b.refund_status AS "refundStatus", b.refund_reference AS "refundReference", a.name AS "agencyName",
+               w.status AS "paymentStatus", w.amount_cents AS "paidCents"
+        FROM bookings b
+        JOIN agencies a ON a.id = b.agency_id
+        LEFT JOIN waafi_payments w ON w.booking_id = b.id
+        WHERE b.created_at >= ? AND b.created_at < ? ${agencyFilter ? 'AND b.agency_id = ?' : ''}
+        ORDER BY b.created_at DESC`).all(`${from}T00:00:00.000Z`, `${nextIsoDate(to)}T00:00:00.000Z`, ...(agencyFilter ? [agencyFilter] : []));
+      const stateLabels = { REQUESTED: 'New request', PAYMENT_PENDING: 'Waiting for payment', PAYMENT_RECEIVED: 'Paid - needs confirmation',
+        ACCEPTED: 'Confirmed', REJECTED: 'Declined', CANCELLED: 'Cancelled' };
+      const sold = new Set(['ACCEPTED', 'PAYMENT_RECEIVED']);
+      const bookings = rows.map(row => {
+        let totalCents = 0;
+        try { totalCents = Number(JSON.parse(row.financialsJson).customerGrandTotalCents) || 0; } catch {}
+        const { financialsJson, ...rest } = row;
+        return { ...rest, seatCount: Number(row.seatCount), totalCents, paidOnline: row.paymentStatus === 'APPROVED' };
+      });
+      if (url.searchParams.get('format') === 'csv') {
+        const header = ['Booking number', 'Booked on', 'Travel date', 'Trip', 'Type', 'Agency', 'Traveler', 'Phone', 'Seats', 'Status',
+          'Payment', 'Total (USD)', 'Paid online (USD)', 'Refund', 'Refund reference'];
+        const lines = [header, ...bookings.map(item => [item.reference, item.createdAt.slice(0, 10), item.travelDate || '', item.offerTitle, item.category,
+          item.agencyName, item.travelerName, item.phone, item.seatCount, stateLabels[item.state] || item.state,
+          item.paymentProvider === 'WAAFI' ? `WaafiPay (${item.paymentStatus || 'not started'})` : 'Pay the agency directly',
+          (item.totalCents / 100).toFixed(2), item.paidOnline ? (Number(item.paidCents) / 100).toFixed(2) : '0.00',
+          item.refundStatus === 'NEEDED' ? 'Refund needed' : item.refundStatus === 'REFUNDED' ? 'Refunded' : '', item.refundReference || ''])];
+        const csv = '﻿' + lines.map(line => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
+        response.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="safar-kaabe-sales-${from}-to-${to}.csv"`,
+          'Cache-Control': 'no-store'
+        }).end(csv);
+        return;
+      }
+      const emptyTotals = () => ({ requests: 0, confirmed: 0, cancelled: 0, seatsSold: 0, salesCents: 0, paidOnlineCents: 0 });
+      const add = (totals, item) => {
+        totals.requests += 1;
+        if (sold.has(item.state)) { totals.confirmed += 1; totals.seatsSold += item.seatCount; totals.salesCents += item.totalCents; }
+        if (item.state === 'CANCELLED' || item.state === 'REJECTED') totals.cancelled += 1;
+        if (item.paidOnline) totals.paidOnlineCents += Number(item.paidCents) || 0;
+        return totals;
+      };
+      const totals = emptyTotals();
+      const byTrip = new Map();
+      const byMonth = new Map();
+      for (const item of bookings) {
+        add(totals, item);
+        if (!byTrip.has(item.offerTitle)) byTrip.set(item.offerTitle, { trip: item.offerTitle, ...emptyTotals() });
+        add(byTrip.get(item.offerTitle), item);
+        const month = item.createdAt.slice(0, 7);
+        if (!byMonth.has(month)) byMonth.set(month, { month, ...emptyTotals() });
+        add(byMonth.get(month), item);
+      }
+      sendJson(response, 200, {
+        from, to, totals,
+        refundsNeeded: bookings.filter(item => item.refundStatus === 'NEEDED').length,
+        byTrip: [...byTrip.values()].sort((a, b) => b.salesCents - a.salesCents || b.requests - a.requests),
+        byMonth: [...byMonth.values()].sort((a, b) => b.month.localeCompare(a.month))
+      });
       return;
     }
 
@@ -4454,6 +4964,7 @@ async function handleApi(request, response, url) {
           b.offer_title AS offerTitle, b.category, b.payment_provider AS paymentProvider, b.state,
           b.financials_json, b.seat_count AS seatCount, b.travel_date AS travelDate,
           b.created_at AS createdAtUtc, b.updated_at AS updatedAtUtc,
+          b.refund_status AS refundStatus, b.refund_reference AS refundReference, b.refund_note AS refundNote, b.refunded_at AS refundedAt,
           (SELECT status FROM waafi_payments WHERE booking_id = b.id) AS paymentStatus,
           (SELECT transaction_id FROM waafi_payments WHERE booking_id = b.id) AS paymentTransactionId,
           (SELECT reference_id FROM waafi_payments WHERE booking_id = b.id) AS paymentReference,
@@ -4533,7 +5044,8 @@ async function handleApi(request, response, url) {
         return;
       }
       if (offer.available < seatCount) {
-        sendJson(response, 409, { error: `Only ${offer.available} ${offer.available === 1 ? 'seat is' : 'seats are'} left for this trip. Choose fewer seats or another trip.` });
+        sendJson(response, 409, { error: `Only ${offer.available} ${offer.available === 1 ? 'seat is' : 'seats are'} left for this trip. Choose fewer seats or another trip.`,
+          availableSeats: Number(offer.available), waitlistAvailable: user?.role === 'CLIENT' });
         return;
       }
       const rawPaymentMethod = typeof body.paymentMethod === 'string' ? body.paymentMethod : 'REQUEST_ONLY';
@@ -4609,7 +5121,8 @@ async function handleApi(request, response, url) {
       if (!inventoryAvailable) {
         const latestInventory = await db.prepare('SELECT available FROM catalog_products WHERE id = ?').get(offer.id);
         const availableSeats = latestInventory?.available ?? 0;
-        sendJson(response, 409, { error: `Only ${availableSeats} ${availableSeats === 1 ? 'seat is' : 'seats are'} left for this trip. Choose fewer seats or another trip.` });
+        sendJson(response, 409, { error: `Only ${availableSeats} ${availableSeats === 1 ? 'seat is' : 'seats are'} left for this trip. Choose fewer seats or another trip.`,
+          availableSeats, waitlistAvailable: user?.role === 'CLIENT' });
         return;
       }
       let paymentStart = null;
@@ -4721,6 +5234,7 @@ async function handleApi(request, response, url) {
         deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push notification failed:', error.message));
       }
       await audit(user?.id || null, paymentStart ? 'WAAFI_CHECKOUT_STARTED' : 'BOOKING_REQUESTED', `${booking.reference} (${booking.agencyId})`);
+      if (user?.role === 'CLIENT') await db.prepare('DELETE FROM trip_waitlist WHERE offer_id = ? AND user_id = ?').run(offer.id, user.id);
       publishCatalogChange('availability');
       sendJson(response, 201, { booking: { ...booking, ref: booking.reference, createdAtUtc,
         paymentStatus: paymentStart ? 'PENDING' : null, paymentReference: paymentStart?.referenceId || null,

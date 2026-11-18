@@ -1476,6 +1476,37 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   });
   assert.equal(resetAdminLogin.status, 200);
 
+  // ---- Sign-in codes by email ----
+  const codeAdminCookie = cookieJar(resetAdminLogin);
+  const codeAdminCsrf = csrfToken(codeAdminCookie);
+  assert.equal((await request('/api/auth/login-code', { method: 'PATCH', cookie: codeAdminCookie, csrf: codeAdminCsrf,
+    body: { enabled: true, password: 'not-the-right-password' } })).status, 400, 'turning on sign-in codes needs the current password');
+  const enableCodes = await request('/api/auth/login-code', { method: 'PATCH', cookie: codeAdminCookie, csrf: codeAdminCsrf,
+    body: { enabled: true, password: 'reset-admin-password-next' } });
+  assert.equal(enableCodes.status, 200);
+  assert.equal((await enableCodes.json()).user.loginCodeEnabled, true);
+  const emailsBeforeCode = deliveredEmails.length;
+  const codeLogin = await request('/api/auth/login', { method: 'POST', body: { email: 'admin@example.com', password: 'reset-admin-password-next' } });
+  assert.equal(codeLogin.status, 200);
+  assert.equal(cookieJar(codeLogin).includes('sk_session='), false, 'no session is created until the emailed code is entered');
+  const codeChallenge = await codeLogin.json();
+  assert.equal(codeChallenge.loginCodeRequired, true);
+  assert.equal(codeChallenge.user, undefined);
+  assert.equal(deliveredEmails.length, emailsBeforeCode + 1, 'the sign-in code is emailed');
+  const signInCode = deliveredEmails[emailsBeforeCode].body.match(/sign-in code is (\d{6})/)?.[1];
+  assert.ok(signInCode, 'the email contains the six-digit sign-in code');
+  const wrongCode = signInCode === '000000' ? '111111' : '000000';
+  assert.equal((await request('/api/auth/login/verify', { method: 'POST', body: { challengeId: codeChallenge.challengeId, code: wrongCode } })).status, 400);
+  const verifiedLogin = await request('/api/auth/login/verify', { method: 'POST', body: { challengeId: codeChallenge.challengeId, code: signInCode } });
+  assert.equal(verifiedLogin.status, 200);
+  assert.ok(cookieJar(verifiedLogin).includes('sk_session='), 'the correct code signs the user in');
+  assert.equal((await request('/api/auth/login/verify', { method: 'POST', body: { challengeId: codeChallenge.challengeId, code: signInCode } })).status, 400, 'a code works only once');
+  const verifiedCookie = cookieJar(verifiedLogin);
+  const disableCodes = await request('/api/auth/login-code', { method: 'PATCH', cookie: verifiedCookie, csrf: csrfToken(verifiedCookie),
+    body: { enabled: false, password: 'reset-admin-password-next' } });
+  assert.equal(disableCodes.status, 200);
+  assert.equal((await disableCodes.json()).user.loginCodeEnabled, false);
+
   const ticketAgencyLogin = await request('/api/auth/login', {
     method: 'POST',
     body: { email: 'owner@example.com', password: 'long-enough-owner-password' }
@@ -1835,7 +1866,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /navigator\.serviceWorker\.addEventListener\('controllerchange'/);
   assert.match(appMarkup, /updateViaCache: 'none'/);
   const serviceWorkerSource = await fs.readFile(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.match(serviceWorkerSource, /safar-kaabe-v97/);
+  assert.match(serviceWorkerSource, /safar-kaabe-v98/);
   assert.match(appMarkup, /id="notificationsButton"/);
   assert.match(appMarkup, /function enableWebPush()/);
   assert.match(appMarkup, /function toggleConversationFavorite\(id, event\)/);
@@ -1887,7 +1918,8 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /id="bookingSeatCount"[^>]*oninput="updateFinancialEngineView\(\)"/);
   assert.match(appMarkup, /seatCount,\s*paymentMethod/);
   assert.match(appMarkup, /seatCount > Number\(selectedOffer\.available\)/);
-  assert.match(appMarkup, /Choose between 1 and \$\{Number\(selectedOffer\.available\) \|\| 0\} available seats/);
+  assert.match(appMarkup, /const left = Number\(selectedOffer\.available\) \|\| 0;/);
+  assert.match(appMarkup, /Choose between 1 and \$\{left\} available seats/);
   assert.match(appMarkup, /scrollIntoView\(\{/);
   assert.match(appMarkup, /Send booking request/);
   assert.match(appMarkup, /<body class="min-h-screen flex selection:bg-\[#C909E6\] selection:text-white">/);
@@ -1944,7 +1976,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const serviceWorker = await request('/sw.js');
   assert.equal(serviceWorker.status, 200);
   const serviceWorkerText = await serviceWorker.text();
-  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v97'/);
+  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v98'/);
   assert.match(serviceWorkerText, /const CORE_FILES = \['\.\/', '\.\/the%20style\.html', '\.\/manifest\.webmanifest'\]/);
   assert.match(serviceWorkerText, /Promise\.allSettled\(APP_FILES\.map\(path => cache\.add\(path\)\)\)/);
   assert.match(serviceWorkerText, /request\.headers\.has\('range'\)/);
