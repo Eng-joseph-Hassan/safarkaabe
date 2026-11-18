@@ -213,8 +213,8 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     await fs.rm(dataDir, { recursive: true, force: true });
   });
 
-  async function request(route, { method = 'GET', body, cookie = '', csrf = '' } = {}) {
-    const headers = { Origin: baseUrl };
+  async function request(route, { method = 'GET', body, cookie = '', csrf = '', headers: requestHeaders = {} } = {}) {
+    const headers = { ...requestHeaders, Origin: baseUrl };
     if (cookie) headers.Cookie = cookie;
     if (csrf) headers['X-CSRF-Token'] = csrf;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -415,6 +415,64 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.equal(customerRegistration.status, 201);
   const customerCookie = cookieJar(customerRegistration);
   const customerCsrf = csrfToken(customerCookie);
+  const defaultNotificationPreferences = await (await request('/api/notification-preferences', { cookie: customerCookie })).json();
+  assert.equal(defaultNotificationPreferences.soundEnabled, true);
+  assert.equal(defaultNotificationPreferences.bookingAlerts, true);
+  assert.equal(defaultNotificationPreferences.promotionalNotifications, false);
+  assert.deepEqual(defaultNotificationPreferences.mutedConversationIds, []);
+  const savedNotificationPreferences = await request('/api/notification-preferences', {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      soundEnabled: false,
+      desktopPushEnabled: true,
+      bookingAlerts: false,
+      paymentNotifications: true,
+      travelNews: false,
+      promotionalNotifications: true,
+      statusUpdates: false,
+      lockScreenPreviews: false,
+      quietHoursEnabled: true,
+      quietHoursStart: '21:30',
+      quietHoursEnd: '07:15',
+      timezone: 'Africa/Mogadishu',
+      mutedConversationIds: []
+    }
+  });
+  assert.equal(savedNotificationPreferences.status, 200);
+  const persistedNotificationPreferences = await (await request('/api/notification-preferences', { cookie: customerCookie })).json();
+  assert.equal(persistedNotificationPreferences.soundEnabled, false);
+  assert.equal(persistedNotificationPreferences.lockScreenPreviews, false);
+  assert.equal(persistedNotificationPreferences.quietHoursStart, '21:30');
+  assert.equal(persistedNotificationPreferences.timezone, 'Africa/Mogadishu');
+  const invalidNotificationTimeZone = await request('/api/notification-preferences', {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      soundEnabled: false, desktopPushEnabled: true, bookingAlerts: true, paymentNotifications: true,
+      travelNews: true, promotionalNotifications: false, statusUpdates: true, lockScreenPreviews: true,
+      quietHoursEnabled: false, quietHoursStart: '22:00', quietHoursEnd: '08:00', timezone: 'Not/A_Real_Zone',
+      mutedConversationIds: []
+    }
+  });
+  assert.equal(invalidNotificationTimeZone.status, 400);
+  const missingMutedConversation = await request('/api/notification-mutes', {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { conversationId: 'not-a-conversation' }
+  });
+  assert.equal(missingMutedConversation.status, 404, 'users cannot mute conversations they cannot access');
+  const emptyNotifications = await (await request('/api/notifications', { cookie: customerCookie })).json();
+  assert.deepEqual(emptyNotifications, { notifications: [], unreadCount: 0 });
+  assert.equal((await request('/api/notifications/read-all', {
+    method: 'POST', cookie: customerCookie, csrf: customerCsrf, body: {}
+  })).status, 200);
+  assert.equal((await request('/api/notifications', {
+    method: 'DELETE', cookie: customerCookie, csrf: customerCsrf
+  })).status, 200);
   const realtimeStatusResponse = await request('/api/catalog/realtime');
   assert.deepEqual(await realtimeStatusResponse.json(), { supported: false }, 'serverless deployments use the periodic refresh fallback');
   const notificationStreamResponse = await request('/api/notifications/stream', { cookie: customerCookie });
@@ -711,6 +769,30 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   });
   assert.equal(customerConversationResponse.status, 201);
   const conversationId = (await customerConversationResponse.json()).conversation.id;
+  const muteConversation = await request('/api/notification-mutes', {
+    method: 'POST',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { conversationId }
+  });
+  assert.equal(muteConversation.status, 200);
+  const preferencesWithMutedConversation = await (await request('/api/notification-preferences', { cookie: customerCookie })).json();
+  assert.deepEqual(preferencesWithMutedConversation.mutedConversationIds, [conversationId]);
+  const otherAccountMute = await request('/api/notification-mutes', {
+    method: 'POST',
+    cookie: otherAgencyCookie,
+    csrf: otherAgencyCsrf,
+    body: { conversationId }
+  });
+  assert.equal(otherAccountMute.status, 404, 'users cannot mute conversations outside their access');
+  const unmuteConversation = await request('/api/notification-mutes', {
+    method: 'DELETE',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { conversationId }
+  });
+  assert.equal(unmuteConversation.status, 200);
+  assert.deepEqual((await (await request('/api/notification-preferences', { cookie: customerCookie })).json()).mutedConversationIds, []);
   const videoCallResponse = await request(`/api/conversations/${conversationId}/calls`, {
     method: 'POST',
     cookie: customerCookie,
@@ -1183,9 +1265,64 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.equal(booking.state, 'REQUESTED');
   assert.equal(booking.paymentProvider, 'REQUEST_ONLY');
   assert.equal(booking.travelerEmail, 'traveler@example.com');
+  const editedBookingResponse = await request(`/api/bookings/${booking.id}`, {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      action: 'EDIT',
+      travelerName: 'Traveler One Updated',
+      travelerEmail: 'traveler@example.com',
+      phone: '+252611234567',
+      travelDate: '2099-03-20',
+      seatCount: 1
+    }
+  });
+  assert.equal(editedBookingResponse.status, 200, 'travelers can edit their own pending unpaid booking');
+  const editedBooking = (await editedBookingResponse.json()).booking;
+  assert.equal(editedBooking.travelerName, 'Traveler One Updated');
+  assert.equal(editedBooking.travelDate, '2099-03-20');
+  const travelerApprovalAttempt = await request(`/api/bookings/${booking.id}`, {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { action: 'ACCEPT' }
+  });
+  assert.equal(travelerApprovalAttempt.status, 403, 'travelers cannot approve or otherwise perform agency booking actions');
+  const changedSeatsResponse = await request(`/api/bookings/${multiSeatBooking.id}`, {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      action: 'EDIT',
+      travelerName: 'Traveler One',
+      travelerEmail: 'traveler@example.com',
+      phone: '+252611234567',
+      seatCount: 1
+    }
+  });
+  assert.equal(changedSeatsResponse.status, 200, 'a pending booking can change passenger count');
+  assert.equal((await changedSeatsResponse.json()).booking.financials.customerGrandTotalCents, 24400,
+    'changing passenger count recalculates the server-side booking amount');
+  const inventoryAfterSeatEdit = await (await request('/api/catalog', { cookie: customerCookie })).json();
+  assert.equal(inventoryAfterSeatEdit.catalog.find(item => item.id === seatCountOffer.id).available, 1,
+    'reducing passenger count returns the removed seat to inventory');
+  const deletedBookingResponse = await request(`/api/bookings/${multiSeatBooking.id}`, {
+    method: 'DELETE',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { reason: 'Traveler deleted pending request', returnSeats: true }
+  });
+  assert.equal(deletedBookingResponse.status, 200, 'travelers can delete their own pending unpaid booking');
+  const deletedBookingState = (await (await request('/api/bookings', { cookie: customerCookie })).json())
+    .bookings.find(item => item.id === multiSeatBooking.id);
+  assert.equal(deletedBookingState.state, 'CANCELLED', 'deletion preserves the booking history as a cancellation');
+  const restoredInventory = await (await request('/api/catalog', { cookie: customerCookie })).json();
+  assert.equal(restoredInventory.catalog.find(item => item.id === seatCountOffer.id).available, 2,
+    'deleting the pending booking releases its reserved inventory');
   const customerBookings = await (await request('/api/bookings', { cookie: customerCookie })).json();
   assert.equal(customerBookings.bookings.length, 4);
-  assert.equal(customerBookings.bookings.find(item => item.id === multiSeatBooking.id).seatCount, 2);
+  assert.equal(customerBookings.bookings.find(item => item.id === multiSeatBooking.id).seatCount, 1);
   const inventoryAfterBooking = await (await request('/api/catalog', { cookie: customerCookie })).json();
   assert.ok(!inventoryAfterBooking.catalog.some(product => product.id === 'legacy-flight-available'), 'sold-out inventory is removed from traveler search');
 
@@ -1208,6 +1345,59 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.equal(adminBookings.bookings.length, 9);
   assert.ok(adminBookings.bookings.some(item => item.ref === booking.reference));
   assert.equal(adminBookings.bookings.filter(item => item.travelerEmail?.startsWith('guest')).length, 5);
+  const adminCreatedBookingResponse = await request('/api/bookings', {
+    method: 'POST',
+    cookie: adminCookie,
+    csrf: adminCsrf,
+    body: {
+      customerId: customerSummary.customer.id,
+      offerId: seatCountOffer.id,
+      travelerName: 'Admin-created Traveler',
+      travelerEmail: 'traveler@example.com',
+      phone: '+252611234567',
+      seatCount: 1,
+      paymentMethod: 'REQUEST_ONLY'
+    }
+  });
+  assert.equal(adminCreatedBookingResponse.status, 201, 'Super Admin can create a booking for an existing traveler');
+  const adminCreatedBooking = (await adminCreatedBookingResponse.json()).booking;
+  const travelerCanReadAdminBooking = await (await request('/api/bookings', { cookie: customerCookie })).json();
+  assert.ok(travelerCanReadAdminBooking.bookings.some(item => item.id === adminCreatedBooking.id),
+    'traveler can read a booking created for their account by Super Admin');
+  const adminEditedBookingResponse = await request(`/api/bookings/${adminCreatedBooking.id}`, {
+    method: 'PATCH',
+    cookie: adminCookie,
+    csrf: adminCsrf,
+    body: {
+      action: 'EDIT',
+      travelerName: 'Admin-edited Traveler',
+      travelerEmail: 'traveler@example.com',
+      phone: '+252611234567',
+      travelDate: '',
+      seatCount: 1
+    }
+  });
+  assert.equal(adminEditedBookingResponse.status, 200, 'Super Admin can edit any pending booking');
+  assert.equal((await adminEditedBookingResponse.json()).booking.travelerName, 'Admin-edited Traveler');
+  const adminDeletedBookingResponse = await request(`/api/bookings/${adminCreatedBooking.id}`, {
+    method: 'DELETE',
+    cookie: adminCookie,
+    csrf: adminCsrf,
+    body: { reason: 'Super Admin deleted pending request', returnSeats: true }
+  });
+  assert.equal(adminDeletedBookingResponse.status, 200, 'Super Admin can delete pending bookings');
+  const otherTravelerEdit = await request(`/api/bookings/${adminCreatedBooking.id}`, {
+    method: 'PATCH',
+    cookie: secondCustomerCookie,
+    csrf: csrfToken(secondCustomerCookie),
+    body: {
+      action: 'EDIT',
+      travelerName: 'Unauthorized Edit',
+      travelerEmail: 'traveler2@example.com',
+      phone: '+252622222222'
+    }
+  });
+  assert.equal(otherTravelerEdit.status, 404, 'a traveler cannot edit another traveler’s booking');
 
   const agencySuspension = await request(`/api/agencies/${agency.id}/status`, {
     method: 'PATCH',
@@ -1333,6 +1523,25 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const ticketApproval = await ticketApprovalResponse.json();
   assert.equal(ticketApproval.booking.state, 'ACCEPTED', 'document errors never reject an approved booking');
   assert.match(ticketApproval.ticketError, /confirmed travel date/, 'missing trip details identify the exact validation failure');
+  const clientEditApprovedBooking = await request(`/api/bookings/${ticketBooking.id}`, {
+    method: 'PATCH',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: {
+      action: 'EDIT',
+      travelerName: 'Changed after approval',
+      travelerEmail: 'traveler@example.com',
+      phone: '+252611234567'
+    }
+  });
+  assert.equal(clientEditApprovedBooking.status, 409, 'approved bookings cannot be edited by the traveler');
+  const clientDeleteApprovedBooking = await request(`/api/bookings/${ticketBooking.id}`, {
+    method: 'DELETE',
+    cookie: customerCookie,
+    csrf: customerCsrf,
+    body: { reason: 'Traveler delete attempt', returnSeats: false }
+  });
+  assert.equal(clientDeleteApprovedBooking.status, 409, 'travelers cannot delete approved bookings');
   const ticketStatusBeforeRetry = await request(`/api/bookings/${ticketBooking.id}/ticket`, { cookie: customerCookie });
   assert.equal((await ticketStatusBeforeRetry.json()).status, 'FAILED', 'validation failures have their own persistent document status');
 
@@ -1547,6 +1756,14 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
     assert.equal(carouselImage.headers.get('content-type'), 'image/jpeg');
     assert.ok((await carouselImage.arrayBuffer()).byteLength > 0);
   }
+  const travelVideoBytes = await fs.readFile(path.join(__dirname, '..', 'adss.mp4'));
+  const travelVideo = await request('/adss.mp4', { headers: { Range: 'bytes=0-31' } });
+  assert.equal(travelVideo.status, 206);
+  assert.equal(travelVideo.headers.get('content-type'), 'video/mp4');
+  assert.equal(travelVideo.headers.get('content-range'), `bytes 0-31/${travelVideoBytes.length}`);
+  assert.deepEqual(Buffer.from(await travelVideo.arrayBuffer()), travelVideoBytes.subarray(0, 32));
+  const invalidVideoRange = await request('/adss.mp4', { headers: { Range: 'bytes=999999999-' } });
+  assert.equal(invalidVideoRange.status, 416);
   for (const size of [16, 32, 48, 64, 128, 180, 192, 256, 512]) {
     const iconResponse = await request(`/safar_kaabe_logo_${size}x${size}.png`);
     assert.equal(iconResponse.status, 200, `logo icon ${size}x${size} should be served`);
@@ -1580,6 +1797,26 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const appPage = await request('/the%20style.html');
   assert.equal(appPage.status, 200);
   const appMarkup = await appPage.text();
+  const packageManifest = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.equal(packageManifest.dependencies['@capacitor/ios'], packageManifest.dependencies['@capacitor/core'],
+    'the iOS platform version matches Capacitor core');
+  const iosProject = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App.xcodeproj', 'project.pbxproj'), 'utf8');
+  assert.match(iosProject, /PRODUCT_BUNDLE_IDENTIFIER = com\.safarkaabe\.travel/);
+  assert.match(iosProject, /IPHONEOS_DEPLOYMENT_TARGET = 14\.0/);
+  const iosInfoPlist = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App', 'Info.plist'), 'utf8');
+  assert.match(iosInfoPlist, /NSCameraUsageDescription/);
+  assert.match(iosInfoPlist, /NSMicrophoneUsageDescription/);
+  const iosWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-build.yml'), 'utf8');
+  assert.match(iosWorkflow, /runs-on: macos-15/);
+  assert.match(iosWorkflow, /xcodebuild/);
+  const iosAppStoreWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-appstore.yml'), 'utf8');
+  assert.match(iosAppStoreWorkflow, /workflow_dispatch/);
+  assert.match(iosAppStoreWorkflow, /CODE_SIGN_IDENTITY="Apple Distribution"/);
+  assert.match(iosAppStoreWorkflow, /IOS_PROVISIONING_PROFILE_BASE64/);
+  assert.match(appMarkup, /const IS_IOS_SAFARI = !IS_NATIVE_APP/);
+  assert.match(appMarkup, /id="iosInstallInstructions"[^>]*role="dialog"/);
+  assert.match(appMarkup, /Add to Home Screen/);
+  assert.match(appMarkup, /not an App Store download/);
   assert.match(appMarkup, /id="conversationAdminRecipientType"[\s\S]*?id="conversationAdminRecipient"/);
   assert.match(appMarkup, /function renderAdminConversationRecipients\(\)/);
   assert.match(appMarkup, /newConversationButton'\)\.classList\.remove\('hidden'\)/);
@@ -1593,12 +1830,12 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /id="chatDashboardBackButton"[^>]*onclick="closeMessagingCenter\(\)"[^>]*aria-label="Back to dashboard"/);
   assert.match(appMarkup, /id="conversationFilterFavorites"[^>]*setConversationFilter\('favorites'\)/);
   assert.match(appMarkup, /id="conversationMessageSearch"[^>]*filterConversationMessages\(this\.value\)/);
-  assert.match(appMarkup, /Provider-confirmed WaafiPay receipt/);
+  assert.match(appMarkup, /Payment confirmed by WaafiPay/);
   assert.match(appMarkup, /registration\.update\(\)/);
   assert.match(appMarkup, /navigator\.serviceWorker\.addEventListener\('controllerchange'/);
   assert.match(appMarkup, /updateViaCache: 'none'/);
   const serviceWorkerSource = await fs.readFile(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.match(serviceWorkerSource, /safar-kaabe-v91/);
+  assert.match(serviceWorkerSource, /safar-kaabe-v97/);
   assert.match(appMarkup, /id="notificationsButton"/);
   assert.match(appMarkup, /function enableWebPush()/);
   assert.match(appMarkup, /function toggleConversationFavorite\(id, event\)/);
@@ -1653,10 +1890,10 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /Choose between 1 and \$\{Number\(selectedOffer\.available\) \|\| 0\} available seats/);
   assert.match(appMarkup, /scrollIntoView\(\{/);
   assert.match(appMarkup, /Send booking request/);
-  assert.match(appMarkup, /<body class="min-h-screen flex selection:bg-emerald-500 selection:text-black">/);
+  assert.match(appMarkup, /<body class="min-h-screen flex selection:bg-\[#C909E6\] selection:text-white">/);
   assert.match(appMarkup, /<div id="appLoadingIndicator" class="app-loading-indicator hidden"/);
   assert.doesNotMatch(appMarkup, /body\.app-starting/);
-  assert.match(appMarkup, /\[class\*="bg-emerald-"\][\s\S]*?background-color: transparent !important/);
+  assert.doesNotMatch(appMarkup, /(?:bg|text|border)-(?:emerald|green|lime|teal)-\d/, 'green interface colors are replaced with #C909E6');
   assert.match(appMarkup, /\.onboarding-next \{ border: 1px solid #C909E6; background: transparent;/);
   assert.match(appMarkup, /class="rounded-xl border border-\[#C909E6\]\/40 bg-transparent[^"]*"/);
   assert.match(appMarkup, /function startCustomerOfferRefresh\(\)/);
@@ -1671,10 +1908,23 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /Continue as Guest/);
   assert.match(appMarkup, /Continue as Guest|Browse as a guest/);
   assert.match(appMarkup, /id="searchMaxPrice"[^>]*oninput="renderCatalog\(\)"/);
-  assert.match(appMarkup, /id="travelerSearchFilters"[^>]*role="search"[\s\S]*?Where would you like to go\?[\s\S]*?id="searchOrigin" type="text" placeholder="City or airport name"/);
+  assert.match(appMarkup, /id="travelerSearchFilters"[^>]*role="search"[^>]*md:grid-cols-2/);
+  assert.match(appMarkup, /Where would you like to go\?[\s\S]*?md:col-span-2[\s\S]*?id="searchAgencyFilter"[^>]*>[\s\S]*?All travel companies/);
+  assert.match(appMarkup, /id="searchOrigin" type="text" placeholder="Any origin"/);
+  assert.match(appMarkup, /label for="searchOrigin" class="travel-search-label">Starting city or airport/);
+  assert.match(appMarkup, /label for="searchDate" class="travel-search-label">Travel date/);
   assert.match(appMarkup, /id="searchOriginHelp"[^>]*>For example: Baidoa or BXX\./);
   assert.match(appMarkup, /id="searchDateHelp"[^>]*>Optional — choose a date to narrow your search\./);
   assert.match(appMarkup, /id="findTripsButton" type="button" onclick="performGlobalSearch\(\)"/);
+  assert.match(appMarkup, /aria-label="Notification center"/);
+  assert.match(appMarkup, /id="notificationCategoryFilter"/);
+  assert.match(appMarkup, /function clearAllNotifications\(\)/);
+  assert.match(appMarkup, /function toggleConversationMute\(conversationId\)/);
+  assert.match(appMarkup, /prefLockScreenPreviews/);
+  assert.match(appMarkup, /prefQuietHours/);
+  assert.match(appMarkup, /function saveNotificationPreferences\(\)/);
+  assert.match(appMarkup, /await markAllNotificationsRead\(\)/);
+  assert.match(appMarkup, /You have a new notification\./);
   assert.doesNotMatch(appMarkup, /id="searchOrigin"[^>]*value="BXX - Baidoa"/);
   assert.doesNotMatch(appMarkup, /#sharedExploreSection,[\s\S]*?#view_CUSTOMER #popularRoutesSection,[\s\S]*?#view_CUSTOMER #categoryTabs \{[\s\S]*?display: none !important/);
   assert.match(appMarkup, /id="supNewImage" type="file" accept="image\/png,image\/jpeg,image\/webp"/);
@@ -1694,18 +1944,26 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   const serviceWorker = await request('/sw.js');
   assert.equal(serviceWorker.status, 200);
   const serviceWorkerText = await serviceWorker.text();
-  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v91'/);
+  assert.match(serviceWorkerText, /const CACHE_NAME = 'safar-kaabe-v97'/);
   assert.match(serviceWorkerText, /const CORE_FILES = \['\.\/', '\.\/the%20style\.html', '\.\/manifest\.webmanifest'\]/);
   assert.match(serviceWorkerText, /Promise\.allSettled\(APP_FILES\.map\(path => cache\.add\(path\)\)\)/);
+  assert.match(serviceWorkerText, /request\.headers\.has\('range'\)/);
   assert.doesNotMatch(serviceWorkerText, /'\.\/logo\.jpeg'/);
   const deploymentConfig = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
   for (const functionConfig of Object.values(deploymentConfig.functions)) {
     assert.match(functionConfig.includeFiles, /safar_kaabe_\*\.png/, 'all PWA icon assets are included in the Vercel function bundle');
+    assert.match(functionConfig.includeFiles, /adss\.mp4/, 'the travel video is included in the Vercel function bundle');
   }
   assert.match(serviceWorkerText, /if \(request\.mode === 'navigate'\) \{\s*event\.respondWith\(fetch\(request\)/);
   assert.match(appMarkup, /My Trips & Vouchers/);
   assert.match(appMarkup, /id="myTripsSearch"/);
   assert.match(appMarkup, /id="myTripsFilter"/);
+  assert.match(appMarkup, /id="adminTripCreateForm" onsubmit="createAdminBooking\(event\)"/);
+  assert.match(appMarkup, /function openMyTripEdit\(bookingId\)/);
+  assert.match(appMarkup, /async function saveMyTripEdit\(event\)/);
+  assert.match(appMarkup, /async function deleteMyTrip\(bookingId\)/);
+  assert.match(appMarkup, /Only pending requests can be deleted\. Approved bookings must be canceled\./);
+  assert.match(appMarkup, /reason: pending \? 'Deleted by booking owner or Super Admin'/);
   assert.doesNotMatch(appMarkup, /See sample confirmation/);
   assert.match(appMarkup, /id="sampleTicketModal"[^>]*role="dialog"/);
   assert.match(appMarkup, /This sample is for preview only\. It is not a real booking, ticket, airline confirmation, or travel document\./);
@@ -1763,7 +2021,29 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /function renderAdditionalSearchMatches\(query\)/);
   assert.match(appMarkup, /booking\.ref, booking\.pnr, booking\.travelerName/);
   assert.match(appMarkup, /function openConversationFromSearch\(id\)/);
-  assert.equal((appMarkup.match(/class="explore-slide(?: hidden)?"/g) || []).length, 9);
+  assert.equal((appMarkup.match(/class="explore-slide(?: hidden)?"/g) || []).length, 10);
+  assert.equal((appMarkup.match(/aria-label="\d+ of 10:/g) || []).length, 10);
+  assert.doesNotMatch(appMarkup, /aria-label="\d+ of 9:/);
+  assert.match(appMarkup, /<video src="adss\.mp4" controls playsinline preload="none"/);
+  assert.match(appMarkup, /let exploreVideoIsInView = false;[\s\S]*?let exploreVideoSoundEnabled = savedExploreVideoState\.soundEnabled === true;/);
+  assert.match(appMarkup, /function playExploreVideo\(video\)/);
+  assert.match(appMarkup, /const EXPLORE_VIDEO_STATE_KEY = 'safar_kaabe_explore_video_state'/);
+  assert.match(appMarkup, /function saveExploreVideoState\(\)[\s\S]*?soundEnabled: exploreVideoSoundEnabled/);
+  assert.match(appMarkup, /function suspendExploreVideo\(\)[\s\S]*?exploreVideoIsInView = false;[\s\S]*?video\.pause\(\);[\s\S]*?video\.muted = true;[\s\S]*?saveExploreVideoState\(\);/);
+  assert.match(appMarkup, /function resumeExploreVideo\(\)[\s\S]*?playExploreVideo\(video\);/);
+  assert.match(appMarkup, /document\.addEventListener\('visibilitychange'[\s\S]*?window\.addEventListener\('pagehide', suspendExploreVideo\);[\s\S]*?window\.addEventListener\('pageshow', resumeExploreVideo\);/);
+  assert.match(appMarkup, /video\.currentTime = Math\.min\(exploreVideoResumeTime, video\.duration \|\| exploreVideoResumeTime\)/);
+  assert.match(appMarkup, /new IntersectionObserver\(entries => \{[\s\S]*?video\.pause\(\);[\s\S]*?video\.muted = true;[\s\S]*?playExploreVideo\(video\);/);
+  assert.match(appMarkup, /if \(activeVideo\) return;/);
+  assert.match(appMarkup, /if \(exploreVideoIsInView\) exploreVideoSoundEnabled = !video\.muted;/);
+  assert.match(appMarkup, /aria-label="Enable video sound"/);
+  assert.match(appMarkup, /function enableExploreVideoSound\(\)/);
+  assert.match(appMarkup, /soundButton\?\.classList\.toggle\('hidden', !video\.muted\)/);
+  assert.match(appMarkup, /error\.name === 'NotAllowedError' && !video\.muted[\s\S]*?video\.muted = true;[\s\S]*?video\.play\(\)/);
+  assert.match(appMarkup, /aria-label="Show travel video 10"/);
+  assert.match(appMarkup, /if \(video\.ended\) video\.currentTime = 0;/);
+  assert.match(appMarkup, /video\.addEventListener\('ended', \(\) => \{[\s\S]*?moveExploreSlide\(1\);/);
+  assert.doesNotMatch(appMarkup, /SAFAR KAABE travel highlights<\/span>/);
   assert.match(appMarkup, /<div id="mobileMenuPanel"[\s\S]*?id="mobileMenuRole"/);
   assert.doesNotMatch(appMarkup.match(/<div id="mobileMenuPanel"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || '', /<img\b/);
   assert.match(appMarkup, /async function openMessagingCenter/);
@@ -1799,25 +2079,6 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /id="mobileTravelerSignInButton" onclick="openAuthGate\('login'\); closeMobileMenu\(\)"/);
   assert.match(appMarkup, /id="mobileTravelerSignUpButton" onclick="openAuthGate\('register'\); closeMobileMenu\(\)"/);
   assert.match(appMarkup, /id="mobileStaffSignInButton" onclick="openAuthGate\('login'\); closeMobileMenu\(\)"/);
-  const packageManifest = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf8'));
-  assert.equal(packageManifest.dependencies['@capacitor/ios'], packageManifest.dependencies['@capacitor/core'],
-    'the iOS platform version matches Capacitor core');
-  const iosProject = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App.xcodeproj', 'project.pbxproj'), 'utf8');
-  assert.match(iosProject, /PRODUCT_BUNDLE_IDENTIFIER = com\.safarkaabe\.travel/);
-  assert.match(iosProject, /IPHONEOS_DEPLOYMENT_TARGET = 14\.0/);
-  const iosInfoPlist = await fs.readFile(path.join(__dirname, '..', 'ios', 'App', 'App', 'Info.plist'), 'utf8');
-  assert.match(iosInfoPlist, /NSCameraUsageDescription/);
-  assert.match(iosInfoPlist, /NSMicrophoneUsageDescription/);
-  const iosWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-build.yml'), 'utf8');
-  assert.match(iosWorkflow, /runs-on: macos-15/);
-  assert.match(iosWorkflow, /xcodebuild/);
-  const iosAppStoreWorkflow = await fs.readFile(path.join(__dirname, '..', '.github', 'workflows', 'ios-appstore.yml'), 'utf8');
-  assert.match(iosAppStoreWorkflow, /workflow_dispatch/);
-  assert.match(iosAppStoreWorkflow, /IOS_PROVISIONING_PROFILE_BASE64/);
-  assert.match(appMarkup, /const IS_IOS_SAFARI = !IS_NATIVE_APP/);
-  assert.match(appMarkup, /id="iosInstallInstructions"[^>]*role="dialog"/);
-  assert.match(appMarkup, /Add to Home Screen/);
-  assert.match(appMarkup, /not an App Store download/);
   assert.match(appMarkup, /mobileTravelerSignUpButton'\)\.classList\.toggle\('hidden', !guest\)/);
   assert.match(appMarkup, /Agency staff, Super Admin and traveler accounts/);
   assert.match(appMarkup, /Choose an offer above to start a request\./);

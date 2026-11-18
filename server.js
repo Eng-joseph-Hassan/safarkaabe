@@ -46,6 +46,7 @@ if (webPushConfigured) {
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.jpeg': 'image/jpeg',
+  '.mp4': 'video/mp4',
   '.png': 'image/png',
   '.js': 'text/javascript; charset=utf-8',
   '.jpg': 'image/jpeg',
@@ -142,7 +143,8 @@ const schema = `
     baggage TEXT NOT NULL DEFAULT '',
     image_mime TEXT,
     image_data TEXT,
-    is_published INTEGER NOT NULL DEFAULT 1 CHECK (is_published IN (0, 1))
+    is_published INTEGER NOT NULL DEFAULT 1 CHECK (is_published IN (0, 1)),
+    image_updated_at TEXT
   );
   CREATE TABLE IF NOT EXISTS sessions (
     id_hash TEXT PRIMARY KEY,
@@ -234,6 +236,17 @@ const schema = `
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     sound_enabled INTEGER NOT NULL DEFAULT 1,
     desktop_push_enabled INTEGER NOT NULL DEFAULT 1,
+    booking_alerts INTEGER NOT NULL DEFAULT 1,
+    payment_notifications INTEGER NOT NULL DEFAULT 1,
+    travel_news INTEGER NOT NULL DEFAULT 1,
+    promotional_notifications INTEGER NOT NULL DEFAULT 0,
+    status_updates INTEGER NOT NULL DEFAULT 1,
+    lock_screen_previews INTEGER NOT NULL DEFAULT 1,
+    quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
+    quiet_hours_start TEXT NOT NULL DEFAULT '22:00',
+    quiet_hours_end TEXT NOT NULL DEFAULT '08:00',
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    muted_conversation_ids TEXT NOT NULL DEFAULT '[]',
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS booking_documents (
@@ -300,6 +313,7 @@ const schema = `
     attachment_data TEXT,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
+    audience TEXT NOT NULL DEFAULT 'EVERYONE' CHECK (audience IN ('EVERYONE', 'CONTACTS')),
     CHECK (body <> '' OR attachment_data IS NOT NULL)
   );
   CREATE TABLE IF NOT EXISTS chat_status_replies (
@@ -346,7 +360,15 @@ const schema = `
     status TEXT NOT NULL DEFAULT 'RINGING' CHECK (status IN ('RINGING', 'ACCEPTED', 'REJECTED', 'ENDED', 'MISSED')),
     created_at TEXT NOT NULL,
     accepted_at TEXT,
-    ended_at TEXT
+    ended_at TEXT,
+    caller_seen_at TEXT,
+    callee_seen_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS blocked_parties (
+    blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (blocker_id, blocked_key)
   );
   CREATE TABLE IF NOT EXISTS chat_call_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -356,6 +378,33 @@ const schema = `
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS chat_status_views (
+    status_id TEXT NOT NULL REFERENCES chat_statuses(id) ON DELETE CASCADE,
+    viewer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at TEXT NOT NULL,
+    PRIMARY KEY (status_id, viewer_id)
+  );
+  CREATE TABLE IF NOT EXISTS agency_reviews (
+    id TEXT PRIMARY KEY,
+    booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
+    agency_id TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+    customer_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT NOT NULL DEFAULT '' CHECK (length(comment) <= 1000),
+    agency_reply TEXT CHECK (agency_reply IS NULL OR length(agency_reply) <= 1000),
+    agency_reply_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS saved_offers (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    offer_id TEXT NOT NULL REFERENCES catalog_products(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, offer_id)
+  );
+  CREATE INDEX IF NOT EXISTS chat_status_views_status_idx ON chat_status_views(status_id, viewed_at);
+  CREATE INDEX IF NOT EXISTS agency_reviews_agency_idx ON agency_reviews(agency_id, created_at);
+  CREATE INDEX IF NOT EXISTS saved_offers_user_idx ON saved_offers(user_id, created_at);
   CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS auth_rate_limits_expiry_idx ON auth_rate_limits(expires_at);
   CREATE INDEX IF NOT EXISTS agency_clients_tenant_idx ON agency_clients(agency_id);
@@ -442,14 +491,24 @@ async function refreshWaafiPayment(referenceId) {
   const status = isApproved ? 'APPROVED' : finalDeclined ? 'DECLINED' : 'PENDING';
   const updatedAt = nowIso();
   const transactionId = params.transactionId ? String(params.transactionId) : payment.transactionId;
+  let seatsReleased = false;
+  let paidAfterCancellation = false;
   await runInTransaction(async () => {
     await db.prepare(`UPDATE waafi_payments SET status = ?, order_id = COALESCE(?, order_id),
       transaction_id = COALESCE(?, transaction_id), updated_at = ? WHERE id = ?`)
       .run(status, params.orderId ? String(params.orderId) : null, transactionId, updatedAt, payment.id);
+    if (status === 'DECLINED') {
+      seatsReleased = await releasePendingPaymentBooking(payment.bookingId, 'Payment was not completed');
+      return;
+    }
     if (status !== 'APPROVED' || !payment.customerId) return;
 
-    await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED', updated_at = ? WHERE id = ? AND state = 'PAYMENT_PENDING'")
+    const bookingPaid = await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED', updated_at = ? WHERE id = ? AND state = 'PAYMENT_PENDING'")
       .run(updatedAt, payment.bookingId);
+    if (bookingPaid.changes !== 1 && payment.status !== 'APPROVED') {
+      const current = await db.prepare('SELECT state FROM bookings WHERE id = ?').get(payment.bookingId);
+      paidAfterCancellation = current?.state === 'CANCELLED';
+    }
     const subject = `Booking ${payment.bookingReference} payment receipt`;
     let conversation = await db.prepare(`SELECT id FROM conversations
       WHERE agency_id = ? AND customer_id = ? AND subject = ?`).get(payment.agencyId, payment.customerId, subject);
@@ -488,10 +547,100 @@ async function refreshWaafiPayment(referenceId) {
     }
   });
   await audit(null, `WAAFI_PAYMENT_${status}`, `${payment.referenceId} (${payment.amountCents} cents)`);
+  if (seatsReleased) publishCatalogChange('availability');
+  if (paidAfterCancellation) {
+    await audit(null, 'PAYMENT_RECEIVED_FOR_CANCELLED_BOOKING', `${payment.bookingReference} (${payment.referenceId})`);
+    try {
+      await createNotifications((await agencyStaffIds(payment.agencyId)).map(staffId => ({
+        recipientUserId: staffId, agencyId: payment.agencyId, bookingId: payment.bookingId, type: 'PAYMENT_NEEDS_REFUND',
+        title: 'Payment received for a cancelled booking',
+        body: `WaafiPay confirmed ${(payment.amountCents / 100).toFixed(2)} ${payment.currency} for booking ${payment.bookingReference}, which was already cancelled. Contact the traveler to rebook or refund.`,
+        href: `/?booking=${encodeURIComponent(payment.bookingId)}`, dedupeKey: `PAYMENT_NEEDS_REFUND:${payment.referenceId}:${staffId}`
+      })));
+    } catch (error) {
+      console.error('Refund-needed notification could not be created:', error.message);
+    }
+  }
+  if (status !== payment.status && ['APPROVED', 'DECLINED'].includes(status)) {
+    try {
+      await createPaymentNotifications(payment, status);
+    } catch (error) {
+      console.error('Payment notification could not be created:', error.message);
+    }
+  }
   return { ...payment, status, transactionId: transactionId || null, updatedAt };
 }
 
 const runInTransaction = callback => db.transaction(callback);
+
+// Cancels a booking that is still waiting for online payment and returns its seats.
+// Must run inside a transaction. Returns true when seats were released.
+async function releasePendingPaymentBooking(bookingId, reason) {
+  const released = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?
+    WHERE id = ? AND state = 'PAYMENT_PENDING'
+      AND NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED')
+    RETURNING seat_count AS "seatCount", offer_id AS "offerId", agency_id AS "agencyId"`).get(reason, nowIso(), bookingId);
+  if (!released) return false;
+  if (released.offerId) {
+    await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ? AND agency_id = ?')
+      .run(released.seatCount, released.offerId, released.agencyId);
+  }
+  return true;
+}
+
+async function notifyReleasedPaymentHold(booking, reason) {
+  try {
+    const items = [];
+    if (booking.customerId) items.push({ recipientUserId: booking.customerId, agencyId: booking.agencyId, bookingId: booking.id,
+      type: 'BOOKING_CANCELLED', title: 'Booking request cancelled',
+      body: `Your booking ${booking.reference} (${booking.offerTitle}) was cancelled because ${reason}. No payment was taken. You can book again.`,
+      href: `/?booking=${encodeURIComponent(booking.id)}`, dedupeKey: `BOOKING_CANCELLED:${booking.id}:${booking.customerId}` });
+    for (const staffId of await agencyStaffIds(booking.agencyId)) items.push({ recipientUserId: staffId, agencyId: booking.agencyId, bookingId: booking.id,
+      type: 'BOOKING_CANCELLED', title: 'Unpaid booking released',
+      body: `Booking ${booking.reference} (${booking.offerTitle}) was cancelled because ${reason}. Its seats are available again.`,
+      href: `/?booking=${encodeURIComponent(booking.id)}`, dedupeKey: `BOOKING_CANCELLED:${booking.id}:${staffId}` });
+    await createNotifications(items);
+  } catch (error) {
+    console.error('Released-hold notification could not be created:', error.message);
+  }
+}
+
+const pendingPaymentHoldMs = 2 * 60 * 60 * 1000;
+let lastPendingPaymentSweep = 0;
+// Abandoned checkouts (the traveler never finishes paying) would otherwise hold seats forever.
+// Release holds older than two hours; runs at most once a minute.
+async function releaseStalePaymentHolds() {
+  if (Date.now() - lastPendingPaymentSweep < 60_000) return;
+  lastPendingPaymentSweep = Date.now();
+  const cutoff = new Date(Date.now() - pendingPaymentHoldMs).toISOString();
+  const stale = await db.prepare(`SELECT bookings.id, bookings.reference, bookings.customer_id AS "customerId",
+      bookings.agency_id AS "agencyId", bookings.offer_title AS "offerTitle", waafi_payments.reference_id AS "paymentReference"
+    FROM bookings LEFT JOIN waafi_payments ON waafi_payments.booking_id = bookings.id
+    WHERE bookings.state = 'PAYMENT_PENDING' AND bookings.created_at < ?
+      AND NOT EXISTS (SELECT 1 FROM waafi_payments approved WHERE approved.booking_id = bookings.id AND approved.status = 'APPROVED')`).all(cutoff);
+  let released = 0;
+  for (const booking of stale) {
+    if (booking.paymentReference) {
+      try {
+        // Ask WaafiPay first: the traveler may have paid without returning to the app.
+        const checked = await refreshWaafiPayment(booking.paymentReference);
+        if (!checked || checked.status === 'APPROVED') continue;
+        if (checked.status === 'DECLINED') continue; // refreshWaafiPayment already released the seats
+      } catch (error) {
+        console.warn(`Skipped releasing unpaid checkout ${booking.reference}: WaafiPay could not confirm its status.`, error.message);
+        continue;
+      }
+    }
+    if (await runInTransaction(() => releasePendingPaymentBooking(booking.id, 'Payment was not completed within 2 hours'))) {
+      released += 1;
+      await notifyReleasedPaymentHold(booking, 'the payment was not completed within 2 hours');
+    }
+  }
+  if (released) {
+    await audit(null, 'PAYMENT_HOLDS_RELEASED', `${released} unpaid checkout(s)`);
+    publishCatalogChange('availability');
+  }
+}
 
 const demoAgencyIds = [
   'ag_east_africa', 'ag_sky_team', 'ag_best_fly', 'ag_airsom', 'ag_daruuro',
@@ -530,7 +679,8 @@ async function initializeDatabase() {
       ['baggage', "TEXT NOT NULL DEFAULT ''"],
       ['image_mime', 'TEXT'],
       ['image_data', 'TEXT'],
-      ['is_published', 'INTEGER NOT NULL DEFAULT 1 CHECK (is_published IN (0, 1))']
+      ['is_published', 'INTEGER NOT NULL DEFAULT 1 CHECK (is_published IN (0, 1))'],
+      ['image_updated_at', 'TEXT']
     ]) {
       if (!catalogColumns.has(column)) await db.exec(`ALTER TABLE catalog_products ADD COLUMN ${column} ${definition}`);
     }
@@ -553,6 +703,10 @@ async function initializeDatabase() {
       if (!bookingDocumentColumns.has(column)) await db.exec(`ALTER TABLE booking_documents ADD COLUMN ${column} ${definition}`);
     }
     await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
+    const statusColumns = new Set((await db.prepare('PRAGMA table_info(chat_statuses)').all()).map(column => column.name));
+    if (!statusColumns.has('audience')) {
+      await db.exec("ALTER TABLE chat_statuses ADD COLUMN audience TEXT NOT NULL DEFAULT 'EVERYONE' CHECK (audience IN ('EVERYONE', 'CONTACTS'))");
+    }
     const deliveryColumns = new Set((await db.prepare('PRAGMA table_info(booking_document_deliveries)').all()).map(column => column.name));
     if (!deliveryColumns.has('document_version')) {
       await db.exec('ALTER TABLE booking_document_deliveries ADD COLUMN document_version INTEGER NOT NULL DEFAULT 1');
@@ -571,6 +725,7 @@ async function initializeDatabase() {
       ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS image_mime TEXT;
       ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS image_data TEXT;
       ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS is_published INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS image_updated_at TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS traveler_email TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS travel_date TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 1;
@@ -602,8 +757,47 @@ async function initializeDatabase() {
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TEXT;
+      ALTER TABLE chat_statuses ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'EVERYONE';
     `);
     await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_reference_idx ON booking_documents(document_reference) WHERE document_reference IS NOT NULL');
+  }
+
+  const callColumns = [['caller_seen_at', 'TEXT'], ['callee_seen_at', 'TEXT']];
+  if (db.isPostgres) {
+    for (const [column, definition] of callColumns) {
+      await db.exec(`ALTER TABLE chat_calls ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+    }
+  } else {
+    const existingCallColumns = new Set((await db.prepare('PRAGMA table_info(chat_calls)').all()).map(column => column.name));
+    for (const [column, definition] of callColumns) {
+      if (!existingCallColumns.has(column)) await db.exec(`ALTER TABLE chat_calls ADD COLUMN ${column} ${definition}`);
+    }
+  }
+
+  const preferenceColumns = [
+    ['booking_alerts', 'INTEGER NOT NULL DEFAULT 1'],
+    ['payment_notifications', 'INTEGER NOT NULL DEFAULT 1'],
+    ['travel_news', 'INTEGER NOT NULL DEFAULT 1'],
+    ['promotional_notifications', 'INTEGER NOT NULL DEFAULT 0'],
+    ['status_updates', 'INTEGER NOT NULL DEFAULT 1'],
+    ['lock_screen_previews', 'INTEGER NOT NULL DEFAULT 1'],
+    ['quiet_hours_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+    ['quiet_hours_start', "TEXT NOT NULL DEFAULT '22:00'"],
+    ['quiet_hours_end', "TEXT NOT NULL DEFAULT '08:00'"],
+    ['timezone', "TEXT NOT NULL DEFAULT 'UTC'"],
+    ['muted_conversation_ids', "TEXT NOT NULL DEFAULT '[]'"]
+  ];
+  if (db.isPostgres) {
+    for (const [column, definition] of preferenceColumns) {
+      await db.exec(`ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+    }
+  } else {
+    const existingPreferenceColumns = new Set((await db.prepare('PRAGMA table_info(notification_preferences)').all()).map(column => column.name));
+    for (const [column, definition] of preferenceColumns) {
+      if (!existingPreferenceColumns.has(column)) {
+        await db.exec(`ALTER TABLE notification_preferences ADD COLUMN ${column} ${definition}`);
+      }
+    }
   }
 
   await db.prepare(`
@@ -668,6 +862,122 @@ const publicUser = user => ({
   lastSeenAt: user.last_seen_at || null
 });
 
+const agencyRatingColumns = agencyIdExpression => `
+  (SELECT AVG(reviews.rating) FROM agency_reviews reviews WHERE reviews.agency_id = ${agencyIdExpression}) AS agencyRating,
+  (SELECT COUNT(*) FROM agency_reviews reviews WHERE reviews.agency_id = ${agencyIdExpression}) AS agencyReviewCount`;
+
+function normalizeAgencyRating(record) {
+  const reviewCount = Number(record.agencyReviewCount || 0);
+  return {
+    ...record,
+    agencyReviewCount: reviewCount,
+    agencyRating: reviewCount && record.agencyRating !== null ? Math.round(Number(record.agencyRating) * 10) / 10 : null
+  };
+}
+
+function reviewerDisplayName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'Verified traveler';
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+}
+
+const chatStatusAudiences = ['EVERYONE', 'CONTACTS'];
+
+function chatStatusOwnerKey(owner) {
+  if (owner.userRole === 'SUPER_ADMIN') return 'ADMIN';
+  if (owner.userRole === 'AGENCY') return `AGENCY:${owner.userAgencyId}`;
+  return `USER:${owner.userId}`;
+}
+
+// People a user has a conversation with (plus colleagues at the same agency) count as contacts for status audiences.
+async function statusContactKeys(user) {
+  const keys = new Set();
+  if (user.role === 'CLIENT') {
+    const rows = await db.prepare('SELECT DISTINCT agency_id AS agencyId FROM conversations WHERE customer_id = ?').all(user.id);
+    for (const row of rows) keys.add(row.agencyId ? `AGENCY:${row.agencyId}` : 'ADMIN');
+  } else if (user.role === 'AGENCY') {
+    keys.add(`AGENCY:${user.agency_id}`);
+    const rows = await db.prepare('SELECT DISTINCT customer_id AS customerId FROM conversations WHERE agency_id = ?').all(user.agency_id);
+    for (const row of rows) keys.add(row.customerId ? `USER:${row.customerId}` : 'ADMIN');
+  } else if (user.role === 'SUPER_ADMIN') {
+    keys.add('ADMIN');
+    const rows = await db.prepare(`SELECT DISTINCT agency_id AS agencyId, customer_id AS customerId FROM conversations
+      WHERE agency_id IS NULL OR customer_id IS NULL`).all();
+    for (const row of rows) keys.add(row.customerId ? `USER:${row.customerId}` : `AGENCY:${row.agencyId}`);
+  }
+  return keys;
+}
+
+function canViewChatStatus(user, status, contactKeys, blocks = null) {
+  if (status.userId === user.id) return true;
+  if (blocks && (blocks.blockedKeys.has(chatStatusOwnerKey(status)) || blocks.blockerIds.has(status.userId))) return false;
+  if ((status.audience || 'EVERYONE') === 'EVERYONE') return true;
+  return contactKeys.has(chatStatusOwnerKey(status));
+}
+
+async function getVisibleChatStatus(statusId, user) {
+  const status = await db.prepare(`SELECT statuses.id, statuses.user_id AS userId, statuses.audience,
+      users.role AS userRole, users.agency_id AS userAgencyId
+    FROM chat_statuses statuses JOIN users ON users.id = statuses.user_id
+    WHERE statuses.id = ? AND statuses.expires_at > ?`).get(statusId, nowIso());
+  if (!status) return null;
+  if (status.userId === user.id) return status;
+  const blocks = await blockStateForUser(user);
+  const contactKeys = (status.audience || 'EVERYONE') === 'EVERYONE' ? new Set() : await statusContactKeys(user);
+  return canViewChatStatus(user, status, contactKeys, blocks) ? status : null;
+}
+
+// ---------- blocking ----------
+// A block is stored against a "party": one traveler (USER:id), one agency (AGENCY:id, covering all its
+// staff) or SAFAR KAABE support (ADMIN). Blocking stops messages, calls and status visibility both ways.
+function partyKeyForUser(user) {
+  const role = user.role || user.userRole;
+  if (role === 'SUPER_ADMIN') return 'ADMIN';
+  if (role === 'AGENCY') return `AGENCY:${user.agency_id || user.agencyId || user.userAgencyId}`;
+  return `USER:${user.id || user.userId}`;
+}
+
+function conversationPeerKey(conversation, user) {
+  if (user.role === 'CLIENT') return conversation.agency_id ? `AGENCY:${conversation.agency_id}` : 'ADMIN';
+  if (user.role === 'AGENCY') return conversation.customer_id ? `USER:${conversation.customer_id}` : 'ADMIN';
+  return conversation.customer_id ? `USER:${conversation.customer_id}` : `AGENCY:${conversation.agency_id}`;
+}
+
+async function partyMemberIds(key) {
+  if (key === 'ADMIN') return (await db.prepare("SELECT id FROM users WHERE role = 'SUPER_ADMIN'").all()).map(row => row.id);
+  if (key.startsWith('AGENCY:')) return (await db.prepare("SELECT id FROM users WHERE role = 'AGENCY' AND agency_id = ?").all(key.slice(7))).map(row => row.id);
+  if (key.startsWith('USER:')) return [key.slice(5)];
+  return [];
+}
+
+async function blockStateForUser(user) {
+  const blockedKeys = new Set((await db.prepare('SELECT blocked_key AS "blockedKey" FROM blocked_parties WHERE blocker_id = ?').all(user.id)).map(row => row.blockedKey));
+  const blockerIds = new Set((await db.prepare('SELECT blocker_id AS "blockerId" FROM blocked_parties WHERE blocked_key = ?').all(partyKeyForUser(user))).map(row => row.blockerId));
+  return { blockedKeys, blockerIds };
+}
+
+// Returns 'BLOCKED_BY_ME', 'BLOCKED_BY_THEM' or null for messages/calls from user to the party peerKey.
+async function blockBetween(user, peerKey) {
+  if (await db.prepare('SELECT 1 AS present FROM blocked_parties WHERE blocker_id = ? AND blocked_key = ?').get(user.id, peerKey)) return 'BLOCKED_BY_ME';
+  const members = await partyMemberIds(peerKey);
+  if (!members.length) return null;
+  const placeholders = members.map(() => '?').join(', ');
+  const blocked = await db.prepare(`SELECT 1 AS present FROM blocked_parties WHERE blocked_key = ? AND blocker_id IN (${placeholders}) LIMIT 1`)
+    .get(partyKeyForUser(user), ...members);
+  return blocked ? 'BLOCKED_BY_THEM' : null;
+}
+
+async function isBlockedBetween(userId, otherUserId) {
+  const user = await db.prepare('SELECT id, role, agency_id FROM users WHERE id = ?').get(userId);
+  const other = await db.prepare('SELECT id, role, agency_id FROM users WHERE id = ?').get(otherUserId);
+  if (!user || !other) return false;
+  return Boolean(await blockBetween(user, partyKeyForUser(other)));
+}
+
+function canReviewBooking(booking, today = new Date().toISOString().slice(0, 10)) {
+  return booking.state === 'ACCEPTED' && (!booking.travelDate || booking.travelDate <= today);
+}
+
 function sendJson(response, status, payload, extraHeaders = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -678,16 +988,41 @@ function sendJson(response, status, payload, extraHeaders = {}) {
   response.end(JSON.stringify(payload));
 }
 
-function sendChatAttachment(response, attachment) {
+function sendChatAttachment(response, attachment, request = null) {
   const bytes = Buffer.from(attachment.attachment_data, 'base64');
-  response.writeHead(200, {
+  const headers = {
     'Content-Type': attachment.attachment_mime,
-    'Content-Length': bytes.length,
     'Content-Disposition': 'inline',
+    'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer'
-  });
+  };
+  // Media players (notably iOS Safari and Android WebView) request audio in byte ranges
+  // and refuse to play or seek when the server ignores the Range header.
+  const range = request?.headers?.range;
+  const match = typeof range === 'string' ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+  if (match && (match[1] || match[2])) {
+    let start;
+    let end;
+    if (!match[1]) {
+      start = Math.max(bytes.length - Number(match[2]), 0);
+      end = bytes.length - 1;
+    } else {
+      start = Number(match[1]);
+      end = match[2] ? Math.min(Number(match[2]), bytes.length - 1) : bytes.length - 1;
+    }
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= bytes.length || end < start) {
+      response.writeHead(416, { ...headers, 'Content-Range': `bytes */${bytes.length}` });
+      response.end();
+      return;
+    }
+    const chunk = bytes.subarray(start, end + 1);
+    response.writeHead(206, { ...headers, 'Content-Length': chunk.length, 'Content-Range': `bytes ${start}-${end}/${bytes.length}` });
+    response.end(chunk);
+    return;
+  }
+  response.writeHead(200, { ...headers, 'Content-Length': bytes.length });
   response.end(bytes);
 }
 
@@ -864,7 +1199,7 @@ function authorizeMutation(request, response, session) {
   const token = request.headers['x-csrf-token'];
   const suppliedHash = typeof token === 'string' ? crypto.createHash('sha256').update(token).digest('hex') : '';
   if (!session || !safeEqual(cookies.sk_csrf || '', token || '') || !safeEqual(session.session.csrf_hash, suppliedHash)) {
-    sendJson(response, 403, { error: 'Your session security token expired. Sign in again.' });
+    sendJson(response, 403, { error: 'You were signed out for your safety. Sign in again to continue.' });
     return false;
   }
   return true;
@@ -911,19 +1246,57 @@ async function getAccessibleConversation(id, user) {
 }
 
 function notificationPublic(record) {
+  const type = record.type;
+  const category = type === 'MESSAGE' || type.startsWith('CALL') ? 'MESSAGES'
+    : type.startsWith('PAYMENT') ? 'PAYMENTS'
+      : type.startsWith('STATUS') ? 'STATUS'
+        : type.startsWith('TRAVEL_NEWS') ? 'TRAVEL_NEWS'
+          : type.startsWith('PROMOTION') ? 'PROMOTIONS' : 'BOOKINGS';
   return {
     id: record.id,
     recipientUserId: record.recipient_user_id || record.recipientUserId,
     agencyId: record.agency_id || record.agencyId || null,
     bookingId: record.booking_id || record.bookingId || null,
     conversationId: record.conversation_id || record.conversationId || null,
-    type: record.type,
+    type,
+    category,
     title: record.title,
     body: record.body,
     href: record.href || null,
     createdAt: record.created_at || record.createdAt,
     readAt: record.read_at || record.readAt || null
   };
+}
+
+function notificationPreferenceEnabled(preferences, type) {
+  if (!preferences) return true;
+  if (type === 'MESSAGE' || type.startsWith('CALL')) return true;
+  if (type.startsWith('PAYMENT')) return Number(preferences.payment_notifications) !== 0;
+  if (type.startsWith('STATUS')) return Number(preferences.status_updates) !== 0;
+  if (type.startsWith('TRAVEL_NEWS')) return Number(preferences.travel_news) !== 0;
+  if (type.startsWith('PROMOTION')) return Number(preferences.promotional_notifications) !== 0;
+  return Number(preferences.booking_alerts) !== 0;
+}
+
+function isWithinQuietHours(preferences, timestamp = new Date()) {
+  if (!preferences || Number(preferences.quiet_hours_enabled) !== 1) return false;
+  const start = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(preferences.quiet_hours_start || '');
+  const end = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(preferences.quiet_hours_end || '');
+  if (!start || !end || !preferences.timezone) return false;
+  const timeParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: preferences.timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(timestamp);
+  const currentMinutes = Number(timeParts.find(part => part.type === 'hour').value) * 60 +
+    Number(timeParts.find(part => part.type === 'minute').value);
+  const startMinutes = Number(start[1]) * 60 + Number(start[2]);
+  const endMinutes = Number(end[1]) * 60 + Number(end[2]);
+  if (startMinutes === endMinutes) return true;
+  return startMinutes < endMinutes
+    ? currentMinutes >= startMinutes && currentMinutes < endMinutes
+    : currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
 function publishNotification(userId, notification) {
@@ -938,14 +1311,19 @@ function publishNotification(userId, notification) {
 
 async function deliverWebPush(userId, notification) {
   if (!webPushConfigured) return;
-  const preferences = await db.prepare('SELECT desktop_push_enabled FROM notification_preferences WHERE user_id = ?').get(userId);
+  const preferences = await db.prepare('SELECT * FROM notification_preferences WHERE user_id = ?').get(userId);
   if (preferences && Number(preferences.desktop_push_enabled) === 0) return;
+  if (!notificationPreferenceEnabled(preferences, notification.type) || isWithinQuietHours(preferences)) return;
+  if (notification.conversationId && preferences) {
+    const mutedIds = JSON.parse(preferences.muted_conversation_ids || '[]');
+    if (Array.isArray(mutedIds) && mutedIds.includes(notification.conversationId)) return;
+  }
   const subscriptions = await db.prepare('SELECT endpoint, subscription_json FROM push_subscriptions WHERE user_id = ?').all(userId);
   for (const subscription of subscriptions) {
     try {
       await webPush.sendNotification(JSON.parse(subscription.subscription_json), JSON.stringify({
-        title: notification.title,
-        body: notification.body,
+        title: preferences && Number(preferences.lock_screen_previews) === 0 ? 'SAFAR KAABE update' : notification.title,
+        body: preferences && Number(preferences.lock_screen_previews) === 0 ? 'You have a new notification.' : notification.body,
         url: notification.href || '/',
         notificationId: notification.id
       }));
@@ -960,9 +1338,18 @@ async function deliverWebPush(userId, notification) {
 }
 
 async function createConversationMessageNotifications(conversation, sender, message) {
-  const recipients = conversation.customer_id && sender.id !== conversation.customer_id
-    ? [{ id: conversation.customer_id }]
-    : await db.prepare("SELECT id FROM users WHERE agency_id = ? AND role = 'AGENCY' AND id <> ?").all(conversation.agency_id, sender.id);
+  const recipientIds = new Set();
+  const addParty = async key => { for (const id of await partyMemberIds(key)) recipientIds.add(id); };
+  if (sender.role === 'CLIENT') {
+    await addParty(conversation.agency_id ? `AGENCY:${conversation.agency_id}` : 'ADMIN');
+  } else if (sender.role === 'AGENCY') {
+    await addParty(conversation.customer_id ? `USER:${conversation.customer_id}` : 'ADMIN');
+  } else {
+    if (conversation.customer_id) await addParty(`USER:${conversation.customer_id}`);
+    if (conversation.agency_id) await addParty(`AGENCY:${conversation.agency_id}`);
+  }
+  recipientIds.delete(sender.id);
+  const recipients = [...recipientIds].map(id => ({ id }));
   const created = [];
   for (const recipient of recipients) {
     const notification = {
@@ -983,6 +1370,65 @@ async function createConversationMessageNotifications(conversation, sender, mess
     publishNotification(notification.recipientUserId, notification);
     deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn('Web push message notification failed:', error.message));
   }
+}
+
+async function createNotifications(items) {
+  const created = [];
+  for (const item of items) {
+    const notification = {
+      id: crypto.randomUUID(), recipientUserId: item.recipientUserId, agencyId: item.agencyId || null,
+      bookingId: item.bookingId || null, conversationId: item.conversationId || null, type: item.type,
+      title: String(item.title).slice(0, 160), body: String(item.body).slice(0, 500), href: item.href || null,
+      createdAt: item.createdAt || nowIso(), readAt: null, dedupeKey: item.dedupeKey
+    };
+    const inserted = await db.prepare(`
+      INSERT INTO notifications (id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (dedupe_key) DO NOTHING
+    `).run(notification.id, notification.recipientUserId, notification.agencyId, notification.bookingId, notification.conversationId,
+      notification.type, notification.title, notification.body, notification.href, notification.dedupeKey, notification.createdAt, notification.readAt);
+    if (inserted.changes === 1) created.push(notification);
+  }
+  for (const notification of created) {
+    publishNotification(notification.recipientUserId, notification);
+    deliverWebPush(notification.recipientUserId, notification).catch(error => console.warn(`Web push ${notification.type} notification failed:`, error.message));
+  }
+  return created;
+}
+
+async function agencyStaffIds(agencyId) {
+  return (await db.prepare("SELECT id FROM users WHERE agency_id = ? AND role = 'AGENCY'").all(agencyId)).map(row => row.id);
+}
+
+async function createPaymentNotifications(payment, status) {
+  const amount = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency}`;
+  const href = `/?booking=${encodeURIComponent(payment.bookingId)}`;
+  const base = { agencyId: payment.agencyId, bookingId: payment.bookingId, href };
+  const items = [];
+  const approved = status === 'APPROVED';
+  if (payment.customerId) {
+    items.push({
+      ...base, recipientUserId: payment.customerId,
+      type: approved ? 'PAYMENT_CONFIRMED' : 'PAYMENT_FAILED',
+      title: approved ? 'Payment confirmed' : 'Payment not completed',
+      body: approved
+        ? `WaafiPay confirmed your payment of ${amount} for booking ${payment.bookingReference} (${payment.offerTitle}). The agency will finalize your trip.`
+        : `WaafiPay did not confirm your payment for booking ${payment.bookingReference} (${payment.offerTitle}). You can try again or message the agency.`,
+      dedupeKey: `PAYMENT:${payment.referenceId}:${status}:${payment.customerId}`
+    });
+  }
+  for (const staffId of await agencyStaffIds(payment.agencyId)) {
+    items.push({
+      ...base, recipientUserId: staffId,
+      type: approved ? 'PAYMENT_RECEIVED' : 'PAYMENT_FAILED',
+      title: approved ? 'Payment received' : 'Customer payment not completed',
+      body: approved
+        ? `Booking ${payment.bookingReference} (${payment.offerTitle}) was paid: ${amount} via WaafiPay. Review and accept the booking.`
+        : `WaafiPay did not confirm the payment for booking ${payment.bookingReference} (${payment.offerTitle}).`,
+      dedupeKey: `PAYMENT:${payment.referenceId}:${status}:${staffId}`
+    });
+  }
+  return createNotifications(items);
 }
 
 function createPdfBuffer(booking, qrBuffer, issuedAt, documentReference) {
@@ -1661,6 +2107,14 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/catalog') {
+    try {
+      await releaseStalePaymentHolds();
+    } catch (error) {
+      console.error('Unable to release unpaid checkout holds:', error);
+    }
+  }
+
   if (!user && method === 'GET' && pathname === '/api/catalog') {
     const catalog = await db.prepare(`
       SELECT p.id, p.category, p.title AS titleEn, p.title_so AS titleSo, p.destination,
@@ -1668,8 +2122,9 @@ async function handleApi(request, response, url) {
              p.supplier_ref AS supplierRef, p.agency_id AS agencyId, p.base_cents AS baseUsdCents,
              p.tax_cents AS taxUsdCents, p.supplier_commission_pct AS supplierCommPct,
              p.available, p.travel_date AS travelDate, p.baggage, p.is_published AS published,
-             CASE WHEN p.image_data IS NOT NULL THEN '/api/catalog/' || p.id || '/image' ELSE NULL END AS imageUrl,
-             p.base_cents + p.tax_cents + CAST(ROUND(p.base_cents * a.markup_pct / 100.0) AS INTEGER) + 1200 AS estimatedTotalUsdCents
+             CASE WHEN p.image_data IS NOT NULL THEN '/api/catalog/' || p.id || '/image?v=' || COALESCE(p.image_updated_at, '0') ELSE NULL END AS imageUrl,
+             p.base_cents + p.tax_cents + CAST(ROUND(p.base_cents * a.markup_pct / 100.0) AS INTEGER) + 1200 AS estimatedTotalUsdCents,
+             ${agencyRatingColumns('p.agency_id')}
       FROM catalog_products p
       JOIN agencies a ON a.id = p.agency_id
       WHERE p.is_published = 1 AND p.available > 0
@@ -1677,7 +2132,42 @@ async function handleApi(request, response, url) {
         AND (p.travel_date IS NULL OR p.travel_date >= date('now'))
       ORDER BY p.title
     `).all();
-    sendJson(response, 200, { catalog });
+    sendJson(response, 200, { catalog: catalog.map(normalizeAgencyRating) });
+    return;
+  }
+
+  const agencyReviewsMatch = pathname.match(/^\/api\/agencies\/([0-9a-z_-]+)\/reviews$/i);
+  if (method === 'GET' && agencyReviewsMatch) {
+    const agency = await db.prepare('SELECT id, name, status, is_approved AS isApproved FROM agencies WHERE id = ?').get(agencyReviewsMatch[1]);
+    const ownAgency = user?.role === 'AGENCY' && user.agency_id === agency?.id;
+    if (!agency || (!(agency.status === 'ACTIVE' && Number(agency.isApproved) === 1) && !ownAgency && user?.role !== 'SUPER_ADMIN')) {
+      sendJson(response, 404, { error: 'Agency not found.' });
+      return;
+    }
+    const summary = await db.prepare(`SELECT COUNT(*) AS reviewCount, AVG(rating) AS averageRating,
+        SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END) AS fiveCount, SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END) AS fourCount,
+        SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END) AS threeCount, SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) AS twoCount,
+        SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) AS oneCount
+      FROM agency_reviews WHERE agency_id = ?`).get(agency.id);
+    const reviews = await db.prepare(`SELECT r.id, r.rating, r.comment, r.agency_reply AS agencyReply,
+        r.agency_reply_at AS agencyReplyAt, r.created_at AS createdAt, r.updated_at AS updatedAt,
+        b.offer_title AS offerTitle, b.travel_date AS travelDate, COALESCE(u.name, b.traveler_name) AS reviewerName
+      FROM agency_reviews r
+      JOIN bookings b ON b.id = r.booking_id
+      LEFT JOIN users u ON u.id = r.customer_id
+      WHERE r.agency_id = ?
+      ORDER BY r.created_at DESC
+      LIMIT 100`).all(agency.id);
+    const count = Number(summary?.reviewCount || 0);
+    sendJson(response, 200, {
+      agency: { id: agency.id, name: agency.name },
+      summary: {
+        reviewCount: count,
+        averageRating: count ? Math.round(Number(summary.averageRating) * 10) / 10 : null,
+        distribution: { 5: Number(summary.fiveCount || 0), 4: Number(summary.fourCount || 0), 3: Number(summary.threeCount || 0), 2: Number(summary.twoCount || 0), 1: Number(summary.oneCount || 0) }
+      },
+      reviews: reviews.map(({ reviewerName, ...review }) => ({ ...review, rating: Number(review.rating), reviewerName: reviewerDisplayName(reviewerName) }))
+    });
     return;
   }
 
@@ -1728,7 +2218,8 @@ async function handleApi(request, response, url) {
     if (process.env.VERCEL) {
       const setupToken = process.env.INITIAL_ADMIN_SETUP_TOKEN;
       if (!setupToken) {
-        sendJson(response, 503, { error: 'Initial administrator setup is not configured. Set INITIAL_ADMIN_SETUP_TOKEN in Vercel first.' });
+        console.error('Initial admin setup requested, but INITIAL_ADMIN_SETUP_TOKEN is not set in the hosting environment.');
+        sendJson(response, 503, { error: 'First-time setup is not ready yet. The system administrator must add a one-time setup token in the hosting settings.' });
         return;
       }
       if (!safeEqual(body.setupToken, setupToken)) {
@@ -1779,11 +2270,12 @@ async function handleApi(request, response, url) {
       transport = passwordResetTransport();
     } catch (error) {
       console.error('Password reset SMTP configuration is invalid.', error);
-      sendJson(response, 503, { error: 'Password reset email is unavailable. Contact the system administrator.' });
+      sendJson(response, 503, { error: 'Password reset by email is not available right now. Contact SAFAR KAABE support for help.' });
       return;
     }
     if (!transport) {
-      sendJson(response, 503, { error: 'Password reset email is not configured. Ask the system administrator to configure SMTP.' });
+      console.error('Password reset requested, but SMTP_HOST, SMTP_USER or SMTP_PASS is not configured.');
+      sendJson(response, 503, { error: 'Password reset by email is not available right now. Contact SAFAR KAABE support for help.' });
       return;
     }
     const account = await db.prepare('SELECT id, email FROM users WHERE email = ? COLLATE NOCASE').get(email);
@@ -2107,8 +2599,9 @@ async function handleApi(request, response, url) {
         SELECT id, recipient_user_id, agency_id, booking_id, conversation_id, type, title, body, href, dedupe_key, created_at, read_at
         FROM notifications WHERE recipient_user_id = ? ORDER BY created_at DESC LIMIT 100
       `).all(user.id);
-      const unread = notifications.filter(item => !item.read_at).length;
-      sendJson(response, 200, { notifications: notifications.map(notificationPublic), unreadCount: unread });
+      const publicNotifications = notifications.map(notificationPublic);
+      const unread = publicNotifications.filter(item => !item.readAt).length;
+      sendJson(response, 200, { notifications: publicNotifications, unreadCount: unread });
       return;
     }
 
@@ -2152,6 +2645,39 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    if (method === 'DELETE' && pathname === '/api/notifications') {
+      if (!authorizeMutation(request, response, session)) return;
+      await db.prepare('DELETE FROM notifications WHERE recipient_user_id = ?').run(user.id);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if ((method === 'POST' || method === 'DELETE') && pathname === '/api/notification-mutes') {
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      if (typeof body.conversationId !== 'string' || !body.conversationId) {
+        sendJson(response, 400, { error: 'A conversation is required.' });
+        return;
+      }
+      const conversation = await getAccessibleConversation(body.conversationId, user);
+      if (!conversation) {
+        sendJson(response, 404, { error: 'Conversation not found.' });
+        return;
+      }
+      const timestamp = nowIso();
+      await db.prepare(`INSERT INTO notification_preferences (user_id, updated_at)
+        VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING`).run(user.id, timestamp);
+      const preferences = await db.prepare('SELECT muted_conversation_ids FROM notification_preferences WHERE user_id = ?').get(user.id);
+      const mutedIds = JSON.parse(preferences.muted_conversation_ids || '[]');
+      const nextMutedIds = method === 'POST'
+        ? [...new Set([...mutedIds, conversation.id])]
+        : mutedIds.filter(id => id !== conversation.id);
+      await db.prepare('UPDATE notification_preferences SET muted_conversation_ids = ?, updated_at = ? WHERE user_id = ?')
+        .run(JSON.stringify(nextMutedIds), timestamp, user.id);
+      sendJson(response, 200, { ok: true, muted: method === 'POST' });
+      return;
+    }
+
     if (method === 'GET' && pathname === '/api/push/public-key') {
       sendJson(response, 200, { configured: webPushConfigured, publicKey: webPushConfigured ? process.env.VAPID_PUBLIC_KEY : null });
       return;
@@ -2186,19 +2712,67 @@ async function handleApi(request, response, url) {
     if (method === 'GET' && pathname === '/api/notification-preferences') {
       const timestamp = nowIso();
       await db.prepare(`INSERT INTO notification_preferences (user_id, updated_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING`).run(user.id, timestamp);
-      const preferences = await db.prepare('SELECT sound_enabled AS soundEnabled, desktop_push_enabled AS desktopPushEnabled FROM notification_preferences WHERE user_id = ?').get(user.id);
-      sendJson(response, 200, { soundEnabled: Boolean(preferences.soundEnabled), desktopPushEnabled: Boolean(preferences.desktopPushEnabled) });
+      const preferences = await db.prepare(`SELECT sound_enabled AS soundEnabled, desktop_push_enabled AS desktopPushEnabled,
+        booking_alerts AS bookingAlerts, payment_notifications AS paymentNotifications, travel_news AS travelNews,
+        promotional_notifications AS promotionalNotifications, status_updates AS statusUpdates,
+        lock_screen_previews AS lockScreenPreviews, quiet_hours_enabled AS quietHoursEnabled,
+        quiet_hours_start AS quietHoursStart, quiet_hours_end AS quietHoursEnd, timezone,
+        muted_conversation_ids AS mutedConversationIds
+        FROM notification_preferences WHERE user_id = ?`).get(user.id);
+      const mutedConversationIds = JSON.parse(preferences.mutedConversationIds || '[]');
+      sendJson(response, 200, {
+        soundEnabled: Boolean(preferences.soundEnabled),
+        desktopPushEnabled: Boolean(preferences.desktopPushEnabled),
+        bookingAlerts: Boolean(preferences.bookingAlerts),
+        paymentNotifications: Boolean(preferences.paymentNotifications),
+        travelNews: Boolean(preferences.travelNews),
+        promotionalNotifications: Boolean(preferences.promotionalNotifications),
+        statusUpdates: Boolean(preferences.statusUpdates),
+        lockScreenPreviews: Boolean(preferences.lockScreenPreviews),
+        quietHoursEnabled: Boolean(preferences.quietHoursEnabled),
+        quietHoursStart: preferences.quietHoursStart,
+        quietHoursEnd: preferences.quietHoursEnd,
+        timezone: preferences.timezone,
+        mutedConversationIds
+      });
       return;
     }
 
     if (method === 'PATCH' && pathname === '/api/notification-preferences') {
       if (!authorizeMutation(request, response, session)) return;
       const body = await readJson(request);
-      if (typeof body.soundEnabled !== 'boolean' || typeof body.desktopPushEnabled !== 'boolean') { sendJson(response, 400, { error: 'Notification preferences are invalid.' }); return; }
+      const booleanFields = [
+        'soundEnabled', 'desktopPushEnabled', 'bookingAlerts', 'paymentNotifications', 'travelNews',
+        'promotionalNotifications', 'statusUpdates', 'lockScreenPreviews', 'quietHoursEnabled'
+      ];
+      if (booleanFields.some(field => typeof body[field] !== 'boolean') ||
+          !/^([01]\d|2[0-3]):([0-5]\d)$/.test(body.quietHoursStart || '') ||
+          !/^([01]\d|2[0-3]):([0-5]\d)$/.test(body.quietHoursEnd || '') ||
+          typeof body.timezone !== 'string' || body.timezone.length > 100) {
+        sendJson(response, 400, { error: 'Notification preferences are invalid.' });
+        return;
+      }
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: body.timezone });
+      } catch {
+        sendJson(response, 400, { error: 'Choose a valid time zone for quiet hours.' });
+        return;
+      }
       await db.prepare(`
-        INSERT INTO notification_preferences (user_id, sound_enabled, desktop_push_enabled, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT (user_id) DO UPDATE SET sound_enabled = excluded.sound_enabled, desktop_push_enabled = excluded.desktop_push_enabled, updated_at = excluded.updated_at
-      `).run(user.id, body.soundEnabled ? 1 : 0, body.desktopPushEnabled ? 1 : 0, nowIso());
+        INSERT INTO notification_preferences (
+          user_id, sound_enabled, desktop_push_enabled, booking_alerts, payment_notifications, travel_news,
+          promotional_notifications, status_updates, lock_screen_previews, quiet_hours_enabled,
+          quiet_hours_start, quiet_hours_end, timezone, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id) DO UPDATE SET
+          sound_enabled = excluded.sound_enabled, desktop_push_enabled = excluded.desktop_push_enabled,
+          booking_alerts = excluded.booking_alerts, payment_notifications = excluded.payment_notifications,
+          travel_news = excluded.travel_news, promotional_notifications = excluded.promotional_notifications,
+          status_updates = excluded.status_updates, lock_screen_previews = excluded.lock_screen_previews,
+          quiet_hours_enabled = excluded.quiet_hours_enabled, quiet_hours_start = excluded.quiet_hours_start,
+          quiet_hours_end = excluded.quiet_hours_end, timezone = excluded.timezone, updated_at = excluded.updated_at
+      `).run(user.id, ...booleanFields.map(field => body[field] ? 1 : 0),
+        body.quietHoursStart, body.quietHoursEnd, body.timezone, nowIso());
       sendJson(response, 200, { ok: true });
       return;
     }
@@ -2249,20 +2823,61 @@ async function handleApi(request, response, url) {
       await db.prepare('DELETE FROM chat_statuses WHERE expires_at <= ?').run(nowIso());
       const statuses = await db.prepare(`
         SELECT statuses.id, statuses.user_id AS userId, users.name AS userName, users.role AS userRole,
+               users.agency_id AS userAgencyId,
                CASE WHEN users.role = 'AGENCY' THEN agencies.logo_mime ELSE users.avatar_mime END AS avatarMime,
                CASE WHEN users.role = 'AGENCY' THEN agencies.logo_data ELSE users.avatar_data END AS avatarData,
-               statuses.body, statuses.attachment_mime AS attachmentMime,
+               statuses.body, statuses.attachment_mime AS attachmentMime, statuses.audience,
                statuses.created_at AS createdAt, statuses.expires_at AS expiresAt,
                (SELECT COUNT(*) FROM chat_status_replies replies WHERE replies.status_id = statuses.id) AS replyCount,
                (SELECT COUNT(*) FROM chat_status_reactions reactions WHERE reactions.status_id = statuses.id) AS reactionCount,
+               (SELECT COUNT(*) FROM chat_status_views views WHERE views.status_id = statuses.id) AS viewCount,
+               (SELECT COUNT(*) FROM chat_status_views views WHERE views.status_id = statuses.id AND views.viewer_id = ?) AS viewedByMeCount,
                (SELECT reactions.emoji FROM chat_status_reactions reactions WHERE reactions.status_id = statuses.id AND reactions.user_id = ?) AS myReaction
         FROM chat_statuses statuses
         JOIN users ON users.id = statuses.user_id
         LEFT JOIN agencies ON agencies.id = users.agency_id
         WHERE statuses.expires_at > ?
         ORDER BY statuses.created_at DESC
-      `).all(user.id, nowIso());
-      sendJson(response, 200, { statuses });
+      `).all(user.id, user.id, nowIso());
+      const contactKeys = await statusContactKeys(user);
+      const statusBlocks = await blockStateForUser(user);
+      const visible = statuses
+        .filter(status => canViewChatStatus(user, status, contactKeys, statusBlocks))
+        .map(({ userAgencyId, viewedByMeCount, viewCount, ...status }) => ({
+          ...status,
+          audience: status.audience || 'EVERYONE',
+          viewedByMe: status.userId === user.id || Number(viewedByMeCount) > 0,
+          viewCount: status.userId === user.id ? Number(viewCount || 0) : null
+        }));
+      sendJson(response, 200, { statuses: visible });
+      return;
+    }
+
+    const statusViewsMatch = pathname.match(/^\/api\/statuses\/([0-9a-f-]+)\/views$/i);
+    if (statusViewsMatch && ['GET', 'POST'].includes(method)) {
+      if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
+      const status = await getVisibleChatStatus(statusViewsMatch[1], user);
+      if (!status) { sendJson(response, 404, { error: 'Status not found or expired.' }); return; }
+      if (method === 'POST') {
+        if (!authorizeMutation(request, response, session)) return;
+        if (status.userId !== user.id) {
+          await db.prepare('INSERT INTO chat_status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?) ON CONFLICT (status_id, viewer_id) DO NOTHING')
+            .run(status.id, user.id, nowIso());
+        }
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (status.userId !== user.id) { sendJson(response, 403, { error: 'Only the status owner can see who viewed it.' }); return; }
+      const viewers = await db.prepare(`SELECT views.viewer_id AS userId, views.viewed_at AS viewedAt, users.name AS userName, users.role AS userRole,
+          CASE WHEN users.role = 'AGENCY' THEN agencies.logo_mime ELSE users.avatar_mime END AS avatarMime,
+          CASE WHEN users.role = 'AGENCY' THEN agencies.logo_data ELSE users.avatar_data END AS avatarData,
+          (SELECT reactions.emoji FROM chat_status_reactions reactions WHERE reactions.status_id = views.status_id AND reactions.user_id = views.viewer_id) AS reaction
+        FROM chat_status_views views
+        JOIN users ON users.id = views.viewer_id
+        LEFT JOIN agencies ON agencies.id = users.agency_id
+        WHERE views.status_id = ?
+        ORDER BY views.viewed_at DESC`).all(status.id);
+      sendJson(response, 200, { audience: status.audience || 'EVERYONE', viewCount: viewers.length, viewers });
       return;
     }
 
@@ -2282,20 +2897,25 @@ async function handleApi(request, response, url) {
         sendJson(response, 400, { error: 'Write a status or add a photo.' });
         return;
       }
+      const audience = body.audience === undefined ? 'EVERYONE' : body.audience;
+      if (!chatStatusAudiences.includes(audience)) {
+        sendJson(response, 400, { error: 'Choose who can see this status: everyone or your contacts.' });
+        return;
+      }
       const id = crypto.randomUUID();
       const createdAt = nowIso();
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      await db.prepare(`INSERT INTO chat_statuses (id, user_id, body, attachment_mime, attachment_data, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, text, attachment?.mime || null, attachment?.data || null, createdAt, expiresAt);
+      await db.prepare(`INSERT INTO chat_statuses (id, user_id, body, attachment_mime, attachment_data, created_at, expires_at, audience)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, text, attachment?.mime || null, attachment?.data || null, createdAt, expiresAt, audience);
       await audit(user.id, 'CHAT_STATUS_CREATED', id);
-      sendJson(response, 201, { status: { id, userId: user.id, body: text, attachmentMime: attachment?.mime || null, createdAt, expiresAt } });
+      sendJson(response, 201, { status: { id, userId: user.id, body: text, attachmentMime: attachment?.mime || null, audience, createdAt, expiresAt, viewCount: 0 } });
       return;
     }
 
     const statusRepliesMatch = pathname.match(/^\/api\/statuses\/([0-9a-f-]+)\/replies$/i);
     if (statusRepliesMatch && method === 'GET') {
       if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
-      const status = await db.prepare('SELECT id, user_id AS userId FROM chat_statuses WHERE id = ? AND expires_at > ?').get(statusRepliesMatch[1], nowIso());
+      const status = await getVisibleChatStatus(statusRepliesMatch[1], user);
       if (!status) { sendJson(response, 404, { error: 'Status not found or expired.' }); return; }
       if (status.userId !== user.id) { sendJson(response, 403, { error: 'Only the status owner can view its replies.' }); return; }
       const replies = await db.prepare(`SELECT replies.id, replies.body, replies.created_at AS createdAt,
@@ -2308,7 +2928,7 @@ async function handleApi(request, response, url) {
     if (statusRepliesMatch && method === 'POST') {
       if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
       if (!authorizeMutation(request, response, session)) return;
-      const status = await db.prepare('SELECT id, user_id AS userId FROM chat_statuses WHERE id = ? AND expires_at > ?').get(statusRepliesMatch[1], nowIso());
+      const status = await getVisibleChatStatus(statusRepliesMatch[1], user);
       if (!status) { sendJson(response, 404, { error: 'Status not found or expired.' }); return; }
       const payload = await readJson(request);
       const text = typeof payload.body === 'string' ? payload.body.trim() : '';
@@ -2318,6 +2938,12 @@ async function handleApi(request, response, url) {
       await db.prepare('INSERT INTO chat_status_replies (id, status_id, user_id, body, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(reply.id, reply.statusId, reply.userId, reply.body, reply.createdAt);
       await audit(user.id, 'CHAT_STATUS_REPLIED', status.id);
+      try {
+        await createNotifications([{ recipientUserId: status.userId, type: 'STATUS_REPLY', title: `${user.name} replied to your status`,
+          body: text.slice(0, 220), dedupeKey: `STATUS_REPLY:${reply.id}` }]);
+      } catch (error) {
+        console.error('Status reply notification could not be created:', error.message);
+      }
       sendJson(response, 201, { reply });
       return;
     }
@@ -2325,7 +2951,7 @@ async function handleApi(request, response, url) {
     if (statusReactionMatch && method === 'POST') {
       if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
       if (!authorizeMutation(request, response, session)) return;
-      const status = await db.prepare('SELECT id FROM chat_statuses WHERE id = ? AND expires_at > ?').get(statusReactionMatch[1], nowIso());
+      const status = await getVisibleChatStatus(statusReactionMatch[1], user);
       if (!status) { sendJson(response, 404, { error: 'Status not found or expired.' }); return; }
       const payload = await readJson(request);
       const emoji = typeof payload.emoji === 'string' ? payload.emoji : '';
@@ -2339,6 +2965,14 @@ async function handleApi(request, response, url) {
       }
       const reaction = existing?.emoji === emoji ? null : emoji;
       await audit(user.id, 'CHAT_STATUS_REACTED', status.id);
+      if (reaction && status.userId !== user.id) {
+        try {
+          await createNotifications([{ recipientUserId: status.userId, type: 'STATUS_REACTION', title: `${user.name} reacted to your status`,
+            body: `${user.name} reacted ${reaction} to your travel update.`, dedupeKey: `STATUS_REACTION:${status.id}:${user.id}:${reaction}` }]);
+        } catch (error) {
+          console.error('Status reaction notification could not be created:', error.message);
+        }
+      }
       sendJson(response, 200, { reaction });
       return;
     }
@@ -2346,8 +2980,9 @@ async function handleApi(request, response, url) {
     const chatStatusAttachmentMatch = pathname.match(/^\/api\/statuses\/([0-9a-f-]+)\/attachment$/i);
     if (chatStatusAttachmentMatch && method === 'GET') {
       if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
-      const status = await db.prepare(`SELECT attachment_mime, attachment_data FROM chat_statuses
-        WHERE id = ? AND expires_at > ? AND attachment_data IS NOT NULL`).get(chatStatusAttachmentMatch[1], nowIso());
+      const visibleStatus = await getVisibleChatStatus(chatStatusAttachmentMatch[1], user);
+      const status = visibleStatus && await db.prepare(`SELECT attachment_mime, attachment_data FROM chat_statuses
+        WHERE id = ? AND expires_at > ? AND attachment_data IS NOT NULL`).get(visibleStatus.id, nowIso());
       if (!status) {
         sendJson(response, 404, { error: 'Status photo not found or expired.' });
         return;
@@ -2372,6 +3007,18 @@ async function handleApi(request, response, url) {
       }
       if (method === 'PATCH') {
         const body = await readJson(request);
+        if (body.audience !== undefined) {
+          if (!chatStatusAudiences.includes(body.audience)) {
+            sendJson(response, 400, { error: 'Choose who can see this status: everyone or your contacts.' });
+            return;
+          }
+          await db.prepare('UPDATE chat_statuses SET audience = ? WHERE id = ? AND user_id = ?').run(body.audience, status.id, user.id);
+          await audit(user.id, 'CHAT_STATUS_AUDIENCE_UPDATED', `${status.id}: ${body.audience}`);
+          if (body.body === undefined) {
+            sendJson(response, 200, { ok: true, audience: body.audience });
+            return;
+          }
+        }
         const text = typeof body.body === 'string' ? body.body.trim() : '';
         if (text.length > 500 || (!text && !status.attachmentData)) {
           sendJson(response, 400, { error: text.length > 500 ? 'Status text cannot be longer than 500 characters.' : 'A photo status must keep a caption or photo.' });
@@ -2379,7 +3026,7 @@ async function handleApi(request, response, url) {
         }
         await db.prepare('UPDATE chat_statuses SET body = ? WHERE id = ? AND user_id = ?').run(text, status.id, user.id);
         await audit(user.id, 'CHAT_STATUS_UPDATED', status.id);
-        sendJson(response, 200, { ok: true, body: text });
+        sendJson(response, 200, { ok: true, body: text, ...(body.audience !== undefined ? { audience: body.audience } : {}) });
         return;
       }
       await db.prepare('DELETE FROM chat_statuses WHERE id = ? AND user_id = ?').run(status.id, user.id);
@@ -2508,6 +3155,41 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    if (pathname === '/api/blocks' && ['GET', 'POST', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
+      if (method !== 'GET' && !authorizeMutation(request, response, session)) return;
+      if (method === 'POST') {
+        const body = await readJson(request);
+        const conversation = await getAccessibleConversation(requireString(body.conversationId, 'Conversation', 80), user);
+        if (!conversation) { sendJson(response, 404, { error: 'Conversation not found.' }); return; }
+        const key = conversationPeerKey(conversation, user);
+        if (key === partyKeyForUser(user)) { sendJson(response, 400, { error: 'You cannot block yourself.' }); return; }
+        await db.prepare('INSERT INTO blocked_parties (blocker_id, blocked_key, created_at) VALUES (?, ?, ?) ON CONFLICT (blocker_id, blocked_key) DO NOTHING')
+          .run(user.id, key, nowIso());
+        await audit(user.id, 'CONTACT_BLOCKED', key);
+        sendJson(response, 200, { ok: true, key });
+        return;
+      }
+      if (method === 'DELETE') {
+        const body = await readJson(request);
+        const key = requireString(body.key, 'Blocked contact', 120);
+        await db.prepare('DELETE FROM blocked_parties WHERE blocker_id = ? AND blocked_key = ?').run(user.id, key);
+        await audit(user.id, 'CONTACT_UNBLOCKED', key);
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      const rows = await db.prepare('SELECT blocked_key AS "key", created_at AS "createdAt" FROM blocked_parties WHERE blocker_id = ? ORDER BY created_at DESC').all(user.id);
+      const blocks = [];
+      for (const row of rows) {
+        let name = 'SAFAR KAABE support';
+        if (row.key.startsWith('AGENCY:')) name = (await db.prepare('SELECT name FROM agencies WHERE id = ?').get(row.key.slice(7)))?.name || 'Travel agency';
+        else if (row.key.startsWith('USER:')) name = (await db.prepare('SELECT name FROM users WHERE id = ?').get(row.key.slice(5)))?.name || 'Traveler';
+        blocks.push({ ...row, name });
+      }
+      sendJson(response, 200, { blocks });
+      return;
+    }
+
     if (method === 'POST' && pathname === '/api/presence') {
       if (!requireRole(response, user, ['SUPER_ADMIN', 'AGENCY', 'CLIENT'])) return;
       if (!authorizeMutation(request, response, session)) return;
@@ -2562,7 +3244,11 @@ async function handleApi(request, response, url) {
           AND NOT EXISTS (SELECT 1 FROM conversation_hidden hidden WHERE hidden.conversation_id = c.id AND hidden.user_id = ?)
         ORDER BY c.last_message_at DESC
       `).all(user.id, nowIso(), user.role, user.role, user.agency_id, user.role, user.id, user.id);
-      sendJson(response, 200, { conversations });
+      const myBlocks = await blockStateForUser(user);
+      sendJson(response, 200, { conversations: conversations.map(conversation => {
+        const peerKey = conversationPeerKey({ agency_id: conversation.agencyId, customer_id: conversation.customerId }, user);
+        return { ...conversation, peerKey, blockedByMe: myBlocks.blockedKeys.has(peerKey) };
+      }) });
       return;
     }
 
@@ -2719,6 +3405,13 @@ async function handleApi(request, response, url) {
           }
         }
       }
+      const newConversationBlock = await blockBetween(user, conversationPeerKey({ agency_id: agencyId, customer_id: customerId }, user));
+      if (newConversationBlock) {
+        sendJson(response, 403, { error: newConversationBlock === 'BLOCKED_BY_ME'
+          ? 'You blocked this contact. Unblock them in My profile to start a chat.'
+          : 'You cannot start a chat with this contact right now.' });
+        return;
+      }
       const conversationId = crypto.randomUUID();
       const firstMessageId = crypto.randomUUID();
       const createdAt = nowIso();
@@ -2796,6 +3489,15 @@ async function handleApi(request, response, url) {
           last_seen_at DESC, created_at LIMIT 1`).get(conversation.agency_id);
       }
       if (!callee || callee.id === user.id) { sendJson(response, 409, { error: 'No other call participant is available in this conversation.' }); return; }
+      if (await isBlockedBetween(user.id, callee.id)) {
+        sendJson(response, 403, { error: 'You cannot call this person because one of you has blocked the other.' });
+        return;
+      }
+      const staleCallBefore = new Date(Date.now() - 90_000).toISOString();
+      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE status = 'ACCEPTED'
+        AND (caller_id IN (?, ?) OR callee_id IN (?, ?))
+        AND (COALESCE(caller_seen_at, accepted_at, created_at) < ? OR COALESCE(callee_seen_at, accepted_at, created_at) < ?)`)
+        .run(nowIso(), user.id, callee.id, user.id, callee.id, staleCallBefore, staleCallBefore);
       const busy = await db.prepare(`SELECT id FROM chat_calls WHERE status IN ('RINGING', 'ACCEPTED')
         AND (caller_id IN (?, ?) OR callee_id IN (?, ?)) LIMIT 1`).get(user.id, callee.id, user.id, callee.id);
       if (busy) { sendJson(response, 409, { error: 'This participant is already in another call. Try again shortly.' }); return; }
@@ -2803,6 +3505,15 @@ async function handleApi(request, response, url) {
       const createdAt = nowIso();
       await db.prepare(`INSERT INTO chat_calls (id, conversation_id, caller_id, callee_id, call_type, status, created_at)
         VALUES (?, ?, ?, ?, ?, 'RINGING', ?)`).run(callId, conversation.id, user.id, callee.id, callType, createdAt);
+      try {
+        await createNotifications([{
+          recipientUserId: callee.id, agencyId: conversation.agency_id, conversationId: conversation.id, type: 'CALL_INCOMING',
+          title: `Incoming ${callType === 'VIDEO' ? 'video' : 'voice'} call`, body: `${user.name} is calling you. Open SAFAR KAABE to answer.`,
+          href: `/?conversation=${encodeURIComponent(conversation.id)}`, createdAt, dedupeKey: `CALL_INCOMING:${callId}`
+        }]);
+      } catch (error) {
+        console.error('Incoming call notification could not be created:', error.message);
+      }
       sendJson(response, 201, { call: { id: callId, conversationId: conversation.id, callerId: user.id,
         calleeId: callee.id, peerName: callee.name, callType, status: 'RINGING', createdAt } });
       return;
@@ -2810,10 +3521,56 @@ async function handleApi(request, response, url) {
 
     const callSignalsMatch = pathname.match(/^\/api\/calls\/([0-9a-f-]+)\/signals$/i);
     const chatCallMatch = pathname.match(/^\/api\/calls\/([0-9a-f-]+)$/i);
+    if (method === 'GET' && pathname === '/api/calls/history') {
+      const history = await db.prepare(`SELECT calls.id, calls.conversation_id AS "conversationId", calls.caller_id AS "callerId",
+          calls.callee_id AS "calleeId", calls.call_type AS "callType", calls.status, calls.created_at AS "createdAt",
+          calls.accepted_at AS "acceptedAt", calls.ended_at AS "endedAt",
+          caller.name AS "callerName", caller.avatar_mime AS "callerAvatarMime", caller.avatar_data AS "callerAvatarData",
+          callee.name AS "calleeName", callee.avatar_mime AS "calleeAvatarMime", callee.avatar_data AS "calleeAvatarData"
+        FROM chat_calls calls JOIN users caller ON caller.id = calls.caller_id JOIN users callee ON callee.id = calls.callee_id
+        WHERE calls.caller_id = ? OR calls.callee_id = ?
+        ORDER BY calls.created_at DESC LIMIT 100`).all(user.id, user.id);
+      sendJson(response, 200, { calls: history.map(call => {
+        const outgoing = call.callerId === user.id;
+        const durationSeconds = call.acceptedAt && call.endedAt
+          ? Math.max(0, Math.round((Date.parse(call.endedAt) - Date.parse(call.acceptedAt)) / 1000)) : null;
+        return {
+          id: call.id, conversationId: call.conversationId, callType: call.callType, status: call.status,
+          direction: outgoing ? 'OUTGOING' : 'INCOMING', createdAt: call.createdAt, durationSeconds,
+          peerName: outgoing ? call.calleeName : call.callerName,
+          peerAvatarMime: outgoing ? call.calleeAvatarMime : call.callerAvatarMime,
+          peerAvatarData: outgoing ? call.calleeAvatarData : call.callerAvatarData
+        };
+      }) });
+      return;
+    }
     if (method === 'GET' && pathname === '/api/calls/active') {
+      const now = nowIso();
+      await db.prepare("UPDATE chat_calls SET caller_seen_at = ? WHERE caller_id = ? AND status IN ('RINGING', 'ACCEPTED')").run(now, user.id);
+      await db.prepare("UPDATE chat_calls SET callee_seen_at = ? WHERE callee_id = ? AND status IN ('RINGING', 'ACCEPTED')").run(now, user.id);
       const cutoff = new Date(Date.now() - 60_000).toISOString();
-      await db.prepare("UPDATE chat_calls SET status = 'MISSED', ended_at = ? WHERE status = 'RINGING' AND created_at < ?")
-        .run(nowIso(), cutoff);
+      const missed = await db.prepare(`UPDATE chat_calls SET status = 'MISSED', ended_at = ? WHERE status = 'RINGING' AND created_at < ?
+        RETURNING id, conversation_id AS "conversationId", caller_id AS "callerId", callee_id AS "calleeId", call_type AS "callType"`)
+        .all(now, cutoff);
+      for (const call of missed) {
+        try {
+          const caller = await db.prepare('SELECT name FROM users WHERE id = ?').get(call.callerId);
+          await createNotifications([{
+            recipientUserId: call.calleeId, conversationId: call.conversationId, type: 'CALL_MISSED',
+            title: `Missed ${call.callType === 'VIDEO' ? 'video' : 'voice'} call`,
+            body: `You missed a call from ${caller?.name || 'a SAFAR KAABE contact'}. Open the chat to call back.`,
+            href: `/?conversation=${encodeURIComponent(call.conversationId)}`, dedupeKey: `CALL_MISSED:${call.id}`
+          }]);
+        } catch (error) {
+          console.error('Missed call notification could not be created:', error.message);
+        }
+      }
+      // A call whose participant closed the app without hanging up would block both people
+      // from new calls. End connected calls when either side has not checked in for 90 seconds.
+      const abandonedBefore = new Date(Date.now() - 90_000).toISOString();
+      await db.prepare(`UPDATE chat_calls SET status = 'ENDED', ended_at = ? WHERE status = 'ACCEPTED'
+        AND (COALESCE(caller_seen_at, accepted_at, created_at) < ? OR COALESCE(callee_seen_at, accepted_at, created_at) < ?)`)
+        .run(now, abandonedBefore, abandonedBefore);
       const calls = await db.prepare(`SELECT calls.id, calls.conversation_id AS conversationId,
         calls.caller_id AS callerId, caller.name AS callerName, caller.avatar_mime AS callerAvatarMime,
         caller.avatar_data AS callerAvatarData, calls.callee_id AS calleeId, callee.name AS calleeName,
@@ -2969,7 +3726,7 @@ async function handleApi(request, response, url) {
         sendJson(response, 404, { error: 'Attachment not found.' });
         return;
       }
-      sendChatAttachment(response, attachment);
+      sendChatAttachment(response, attachment, request);
       return;
     }
 
@@ -2990,9 +3747,11 @@ async function handleApi(request, response, url) {
                messages.created_at AS createdAt, messages.read_at AS readAt
         FROM messages JOIN users ON users.id = messages.sender_id
         LEFT JOIN agencies sender_agency ON sender_agency.id = users.agency_id
-        WHERE messages.conversation_id = ? ORDER BY messages.created_at ASC, messages.id ASC LIMIT 200
+        WHERE messages.conversation_id = ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 200
       `).all(conversation.id);
-      sendJson(response, 200, { messages });
+      messages.reverse();
+      const peerKey = conversationPeerKey(conversation, user);
+      sendJson(response, 200, { messages, block: await blockBetween(user, peerKey) });
       return;
     }
 
@@ -3004,8 +3763,13 @@ async function handleApi(request, response, url) {
         sendJson(response, 404, { error: 'Conversation not found.' });
         return;
       }
-      await db.prepare('UPDATE messages SET read_at = ? WHERE conversation_id = ? AND sender_id != ? AND read_at IS NULL')
-        .run(nowIso(), conversation.id, user.id);
+      const isParticipant = user.role === 'CLIENT' ? conversation.customer_id === user.id
+        : user.role === 'AGENCY' ? conversation.agency_id === user.agency_id
+          : !conversation.agency_id || !conversation.customer_id;
+      if (isParticipant) {
+        await db.prepare('UPDATE messages SET read_at = ? WHERE conversation_id = ? AND sender_id != ? AND read_at IS NULL')
+          .run(nowIso(), conversation.id, user.id);
+      }
       sendJson(response, 200, { ok: true });
       return;
     }
@@ -3015,6 +3779,13 @@ async function handleApi(request, response, url) {
       const conversation = await getAccessibleConversation(conversationMessagesMatch[1], user);
       if (!conversation) {
         sendJson(response, 404, { error: 'Conversation not found.' });
+        return;
+      }
+      const block = await blockBetween(user, conversationPeerKey(conversation, user));
+      if (block) {
+        sendJson(response, 403, { error: block === 'BLOCKED_BY_ME'
+          ? 'You blocked this contact. Unblock them from their profile to send messages again.'
+          : 'You cannot send messages in this chat right now.' });
         return;
       }
       const body = await readJson(request, maxChatRequestBytes);
@@ -3077,8 +3848,9 @@ async function handleApi(request, response, url) {
                  specs, supplier_name AS supplierName, supplier_ref AS supplierRef, agency_id AS agencyId,
                  base_cents AS baseUsdCents, tax_cents AS taxUsdCents, supplier_commission_pct AS supplierCommPct,
                  available, travel_date AS travelDate, baggage, is_published AS published,
-                 CASE WHEN image_data IS NOT NULL THEN '/api/catalog/' || id || '/image' ELSE NULL END AS imageUrl,
-                 base_cents + tax_cents + CAST(ROUND(base_cents * (SELECT markup_pct FROM agencies WHERE agencies.id = catalog_products.agency_id) / 100.0) AS INTEGER) + 1200 AS estimatedTotalUsdCents
+                 CASE WHEN image_data IS NOT NULL THEN '/api/catalog/' || id || '/image?v=' || COALESCE(image_updated_at, '0') ELSE NULL END AS imageUrl,
+                 base_cents + tax_cents + CAST(ROUND(base_cents * (SELECT markup_pct FROM agencies WHERE agencies.id = catalog_products.agency_id) / 100.0) AS INTEGER) + 1200 AS estimatedTotalUsdCents,
+                 ${agencyRatingColumns('catalog_products.agency_id')}
           FROM catalog_products`;
       const products = user.role === 'AGENCY'
         ? await db.prepare(`${selectCatalog} WHERE agency_id = ? ORDER BY title`).all(user.agency_id)
@@ -3089,7 +3861,67 @@ async function handleApi(request, response, url) {
               AND (travel_date IS NULL OR travel_date >= date('now'))
             ORDER BY title`).all()
           : await db.prepare(`${selectCatalog} ORDER BY title`).all();
-      sendJson(response, 200, { catalog: products });
+      sendJson(response, 200, { catalog: products.map(normalizeAgencyRating) });
+      return;
+    }
+
+    if (pathname === '/api/saved-offers' && method === 'GET') {
+      if (!requireRole(response, user, ['CLIENT'])) return;
+      const saved = await db.prepare(`
+        SELECT s.offer_id AS offerId, s.created_at AS savedAt,
+               p.id, p.category, p.title AS titleEn, p.title_so AS titleSo, p.destination, p.route_badge AS routeBadge,
+               p.specs, p.supplier_name AS supplierName, p.supplier_ref AS supplierRef, p.agency_id AS agencyId,
+               p.base_cents AS baseUsdCents, p.tax_cents AS taxUsdCents, p.supplier_commission_pct AS supplierCommPct,
+               p.available, p.travel_date AS travelDate, p.baggage, p.is_published AS published,
+               CASE WHEN p.image_data IS NOT NULL THEN '/api/catalog/' || p.id || '/image?v=' || COALESCE(p.image_updated_at, '0') ELSE NULL END AS imageUrl,
+               p.base_cents + p.tax_cents + CAST(ROUND(p.base_cents * a.markup_pct / 100.0) AS INTEGER) + 1200 AS estimatedTotalUsdCents,
+               a.name AS agencyName,
+               CASE WHEN p.is_published = 1 AND p.available > 0 AND a.status = 'ACTIVE' AND a.is_approved = 1
+                 AND (p.travel_date IS NULL OR p.travel_date >= date('now')) THEN 1 ELSE 0 END AS bookable,
+               ${agencyRatingColumns('p.agency_id')}
+        FROM saved_offers s
+        JOIN catalog_products p ON p.id = s.offer_id
+        JOIN agencies a ON a.id = p.agency_id
+        WHERE s.user_id = ?
+        ORDER BY s.created_at DESC
+      `).all(user.id);
+      sendJson(response, 200, {
+        savedOffers: saved.map(record => {
+          const bookable = Number(record.bookable) === 1;
+          if (bookable) return { ...normalizeAgencyRating(record), bookable: true };
+          return { offerId: record.offerId, savedAt: record.savedAt, id: record.id, titleEn: record.titleEn, titleSo: record.titleSo,
+            agencyId: record.agencyId, agencyName: record.agencyName, bookable: false };
+        })
+      });
+      return;
+    }
+
+    const savedOfferMatch = pathname.match(/^\/api\/saved-offers\/([0-9a-z_-]+)$/i);
+    if (savedOfferMatch && ['PUT', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, ['CLIENT'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const offerId = savedOfferMatch[1];
+      if (method === 'DELETE') {
+        const removed = await db.prepare('DELETE FROM saved_offers WHERE user_id = ? AND offer_id = ?').run(user.id, offerId);
+        sendJson(response, 200, { ok: true, saved: false, removed: removed.changes === 1 });
+        return;
+      }
+      const offer = await db.prepare(`SELECT p.id FROM catalog_products p JOIN agencies a ON a.id = p.agency_id
+        WHERE p.id = ? AND p.is_published = 1 AND p.available > 0 AND a.status = 'ACTIVE' AND a.is_approved = 1
+          AND (p.travel_date IS NULL OR p.travel_date >= date('now'))`).get(offerId);
+      if (!offer) {
+        sendJson(response, 404, { error: 'This trip is no longer available to save.' });
+        return;
+      }
+      const savedCount = await db.prepare('SELECT COUNT(*) AS savedCount FROM saved_offers WHERE user_id = ?').get(user.id);
+      const alreadySaved = await db.prepare('SELECT 1 AS present FROM saved_offers WHERE user_id = ? AND offer_id = ?').get(user.id, offer.id);
+      if (!alreadySaved && Number(savedCount?.savedCount || 0) >= 200) {
+        sendJson(response, 409, { error: 'You can save up to 200 trips. Remove some saved trips first.' });
+        return;
+      }
+      await db.prepare('INSERT INTO saved_offers (user_id, offer_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_id, offer_id) DO NOTHING')
+        .run(user.id, offer.id, nowIso());
+      sendJson(response, 200, { ok: true, saved: true });
       return;
     }
 
@@ -3144,9 +3976,9 @@ async function handleApi(request, response, url) {
         published: Boolean(published)
       };
       await db.prepare(`
-        INSERT INTO catalog_products (id, agency_id, title, title_so, category, destination, route_badge, specs, supplier_name, supplier_ref, base_cents, tax_cents, supplier_commission_pct, available, travel_date, baggage, image_mime, image_data, is_published)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(product.id, product.agencyId, product.titleEn, product.titleSo, product.category, product.destination, product.routeBadge, product.specs, product.supplierName, product.supplierRef, product.baseUsdCents, product.taxUsdCents, product.supplierCommPct, product.available, product.travelDate, product.baggage, imageData ? imageMime : null, imageData, published);
+        INSERT INTO catalog_products (id, agency_id, title, title_so, category, destination, route_badge, specs, supplier_name, supplier_ref, base_cents, tax_cents, supplier_commission_pct, available, travel_date, baggage, image_mime, image_data, is_published, image_updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(product.id, product.agencyId, product.titleEn, product.titleSo, product.category, product.destination, product.routeBadge, product.specs, product.supplierName, product.supplierRef, product.baseUsdCents, product.taxUsdCents, product.supplierCommPct, product.available, product.travelDate, product.baggage, imageData ? imageMime : null, imageData, published, imageData ? String(Date.now()) : null);
       await audit(user.id, published ? 'AGENCY_PRODUCT_PUBLISHED' : 'AGENCY_PRODUCT_DRAFTED', `${title} (${supplierRef})`);
       if (published) publishCatalogChange('published');
       sendJson(response, 201, { product });
@@ -3206,9 +4038,11 @@ async function handleApi(request, response, url) {
         UPDATE catalog_products
         SET title = ?, title_so = ?, category = ?, destination = ?, route_badge = ?, specs = ?,
             base_cents = ?, tax_cents = ?, available = ?, travel_date = ?, baggage = ?,
-            image_mime = ?, image_data = ?, is_published = ?
+            image_mime = ?, image_data = ?, is_published = ?,
+            image_updated_at = CASE WHEN ? = 1 THEN ? ELSE image_updated_at END
         WHERE id = ?
-      `).run(title, title, category, destination, routeBadge, specs, Math.round(price * 100), Math.round(price * 12), available, travelDate, baggage, imageData ? imageMime : null, imageData, published, existing.id);
+      `).run(title, title, category, destination, routeBadge, specs, Math.round(price * 100), Math.round(price * 12), available, travelDate, baggage, imageData ? imageMime : null, imageData, published,
+        body.imageData === undefined ? 0 : 1, String(Date.now()), existing.id);
       await audit(user.id, published ? 'AGENCY_PRODUCT_UPDATED' : 'AGENCY_PRODUCT_UNPUBLISHED', `${title} (${existing.supplier_ref})`);
       publishCatalogChange(published ? 'updated' : 'paused');
       sendJson(response, 200, { ok: true });
@@ -3232,9 +4066,103 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    const bookingReviewMatch = pathname.match(/^\/api\/bookings\/([0-9a-f-]+)\/review$/i);
+    if (bookingReviewMatch && ['PUT', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, method === 'PUT' ? ['CLIENT'] : ['CLIENT', 'SUPER_ADMIN'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const booking = await db.prepare(`SELECT id, reference, agency_id AS agencyId, customer_id AS customerId, state,
+          travel_date AS travelDate, offer_title AS offerTitle FROM bookings WHERE id = ?`).get(bookingReviewMatch[1]);
+      if (!booking || (user.role === 'CLIENT' && booking.customerId !== user.id)) {
+        sendJson(response, 404, { error: 'Booking not found.' });
+        return;
+      }
+      const existing = await db.prepare('SELECT id, rating, comment FROM agency_reviews WHERE booking_id = ?').get(booking.id);
+      if (method === 'DELETE') {
+        if (!existing) { sendJson(response, 404, { error: 'This booking has no review.' }); return; }
+        await db.prepare('DELETE FROM agency_reviews WHERE id = ?').run(existing.id);
+        await audit(user.id, 'AGENCY_REVIEW_DELETED', `${booking.reference} (${booking.agencyId})`);
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (!canReviewBooking(booking)) {
+        sendJson(response, 409, { error: booking.state === 'ACCEPTED'
+          ? `You can review this agency after your trip on ${booking.travelDate}.`
+          : 'Only approved trips can be reviewed.' });
+        return;
+      }
+      const body = await readJson(request);
+      const rating = Number(body.rating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        sendJson(response, 400, { error: 'Choose a rating from 1 to 5 stars.' });
+        return;
+      }
+      if (body.comment !== undefined && body.comment !== null && typeof body.comment !== 'string') {
+        sendJson(response, 400, { error: 'Enter your review as text.' });
+        return;
+      }
+      const comment = (body.comment || '').trim().replace(/\r\n/g, '\n');
+      if (comment.length > 1000) {
+        sendJson(response, 400, { error: 'Reviews cannot be longer than 1,000 characters.' });
+        return;
+      }
+      const timestamp = nowIso();
+      const reviewId = existing?.id || crypto.randomUUID();
+      if (existing) {
+        await db.prepare('UPDATE agency_reviews SET rating = ?, comment = ?, updated_at = ? WHERE id = ?')
+          .run(rating, comment, timestamp, reviewId);
+      } else {
+        await db.prepare(`INSERT INTO agency_reviews (id, booking_id, agency_id, customer_id, rating, comment, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(reviewId, booking.id, booking.agencyId, user.id, rating, comment, timestamp, timestamp);
+      }
+      await audit(user.id, existing ? 'AGENCY_REVIEW_UPDATED' : 'AGENCY_REVIEW_CREATED', `${booking.reference} (${booking.agencyId}): ${rating}/5`);
+      if (!existing) {
+        const staffIds = await agencyStaffIds(booking.agencyId);
+        await createNotifications(staffIds.map(staffId => ({
+          recipientUserId: staffId, agencyId: booking.agencyId, bookingId: booking.id, type: 'REVIEW_RECEIVED',
+          title: `New ${rating}-star review`,
+          body: `${reviewerDisplayName(user.name)} reviewed booking ${booking.reference} (${booking.offerTitle})${comment ? `: “${comment.slice(0, 160)}”` : '.'}`,
+          href: '/?agencyTab=REVIEWS', dedupeKey: `REVIEW_RECEIVED:${reviewId}:${staffId}`
+        })));
+      }
+      publishCatalogChange('reviews');
+      sendJson(response, existing ? 200 : 201, { review: { id: reviewId, bookingId: booking.id, rating, comment, updatedAt: timestamp } });
+      return;
+    }
+
+    const reviewReplyMatch = pathname.match(/^\/api\/reviews\/([0-9a-f-]+)\/reply$/i);
+    if (reviewReplyMatch && method === 'PUT') {
+      if (!requireRole(response, user, ['AGENCY'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const review = await db.prepare(`SELECT r.id, r.agency_id AS agencyId, r.customer_id AS customerId, r.booking_id AS bookingId,
+          r.agency_reply AS agencyReply, b.reference FROM agency_reviews r JOIN bookings b ON b.id = r.booking_id WHERE r.id = ?`).get(reviewReplyMatch[1]);
+      if (!review || review.agencyId !== user.agency_id) {
+        sendJson(response, 404, { error: 'Review not found.' });
+        return;
+      }
+      const body = await readJson(request);
+      const reply = typeof body.reply === 'string' ? body.reply.trim().replace(/\r\n/g, '\n') : '';
+      if (reply.length > 1000) {
+        sendJson(response, 400, { error: 'Replies cannot be longer than 1,000 characters.' });
+        return;
+      }
+      const replyAt = reply ? nowIso() : null;
+      await db.prepare('UPDATE agency_reviews SET agency_reply = ?, agency_reply_at = ? WHERE id = ?').run(reply || null, replyAt, review.id);
+      await audit(user.id, reply ? 'AGENCY_REVIEW_REPLIED' : 'AGENCY_REVIEW_REPLY_REMOVED', `${review.reference} (${review.agencyId})`);
+      if (reply && reply !== review.agencyReply && review.customerId) {
+        const agency = await db.prepare('SELECT name FROM agencies WHERE id = ?').get(review.agencyId);
+        await createNotifications([{
+          recipientUserId: review.customerId, agencyId: review.agencyId, bookingId: review.bookingId, type: 'REVIEW_REPLY',
+          title: `${agency?.name || 'The agency'} replied to your review`, body: reply.slice(0, 220),
+          href: `/?booking=${encodeURIComponent(review.bookingId)}`, dedupeKey: `REVIEW_REPLY:${review.id}:${replyAt}`
+        }]);
+      }
+      sendJson(response, 200, { review: { id: review.id, agencyReply: reply || null, agencyReplyAt: replyAt } });
+      return;
+    }
+
     const bookingActionMatch = pathname.match(/^\/api\/bookings\/([0-9a-f-]+)$/i);
     if (bookingActionMatch && ['PATCH', 'DELETE'].includes(method)) {
-      if (!requireRole(response, user, ['AGENCY', 'SUPER_ADMIN'])) return;
+      if (!requireRole(response, user, ['CLIENT', 'AGENCY', 'SUPER_ADMIN'])) return;
       if (!authorizeMutation(request, response, session)) return;
       const bookingId = bookingActionMatch[1];
       const selectBooking = `SELECT id, reference AS ref, pnr, agency_id AS agencyId, offer_id AS offerId,
@@ -3246,13 +4174,18 @@ async function handleApi(request, response, url) {
         (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference
         FROM bookings WHERE id = ?`;
       const existing = await db.prepare(selectBooking).get(bookingId);
-      if (!existing || (user.role === 'AGENCY' && existing.agencyId !== user.agency_id)) {
+      if (!existing || (user.role === 'AGENCY' && existing.agencyId !== user.agency_id) ||
+          (user.role === 'CLIENT' && existing.customerId !== user.id)) {
         sendJson(response, 404, { error: 'Booking request not found.' });
         return;
       }
 
       if (method === 'PATCH') {
         const body = await readJson(request);
+        if (user.role === 'CLIENT' && body.action !== 'EDIT') {
+          sendJson(response, 403, { error: 'Travelers can only edit their own pending booking details.' });
+          return;
+        }
         let generatedTicket = null;
         let ticketError = null;
         if (body.action === 'ACCEPT') {
@@ -3290,7 +4223,7 @@ async function handleApi(request, response, url) {
           await audit(user.id, 'BOOKING_ACCEPTANCE_UNDONE', `${existing.ref} (${existing.agencyId})`);
         } else if (body.action === 'EDIT') {
           if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
-            sendJson(response, 409, { error: 'Traveler details can only be edited before the request is accepted or paid.' });
+            sendJson(response, 409, { error: 'Booking details can only be edited before the request is accepted or paid.' });
             return;
           }
           if (body.travelerEmail !== undefined && body.travelerEmail !== null && typeof body.travelerEmail !== 'string') {
@@ -3301,14 +4234,83 @@ async function handleApi(request, response, url) {
           const travelerEmailText = typeof body.travelerEmail === 'string' ? body.travelerEmail.trim() : '';
           const travelerEmail = travelerEmailText ? normalizeEmail(travelerEmailText) : null;
           const phone = requireString(body.phone, 'Phone', 40);
-          const updated = await db.prepare(`UPDATE bookings SET traveler_name = ?, traveler_email = ?, phone = ?, updated_at = ?
-            WHERE id = ? AND agency_id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'`)
-            .run(travelerName, travelerEmail, phone, nowIso(), bookingId, existing.agencyId);
-          if (updated.changes !== 1) {
+          const seatCount = body.seatCount === undefined ? existing.seatCount : Number(body.seatCount);
+          if (!Number.isSafeInteger(seatCount) || seatCount < 1 || seatCount > 100000) {
+            sendJson(response, 400, { error: 'Enter a number of seats from 1 to 100,000.' });
+            return;
+          }
+          const travelDate = body.travelDate === undefined
+            ? existing.travelDate
+            : body.travelDate === '' ? null : requireString(body.travelDate, 'Travel date', 10);
+          if (travelDate && (!isValidIsoDate(travelDate) || travelDate < new Date().toISOString().slice(0, 10))) {
+            sendJson(response, 400, { error: 'Choose a valid future travel date.' });
+            return;
+          }
+          const offer = existing.offerId
+            ? await db.prepare(`SELECT p.agency_id AS agencyId, p.travel_date AS listedTravelDate,
+                p.base_cents AS baseCents, p.tax_cents AS taxCents,
+                p.supplier_commission_pct AS supplierCommissionPct, a.markup_pct AS agencyMarkupPct
+              FROM catalog_products p JOIN agencies a ON a.id = p.agency_id WHERE p.id = ?`)
+              .get(existing.offerId)
+            : null;
+          if (offer?.listedTravelDate && travelDate !== offer.listedTravelDate) {
+            sendJson(response, 400, { error: 'Choose the travel date available for this listing.' });
+            return;
+          }
+          if (seatCount !== existing.seatCount && !offer) {
+            sendJson(response, 409, { error: 'Passenger count cannot be changed because this booking is not linked to an active trip listing.' });
+            return;
+          }
+          let financials = JSON.parse(existing.financials_json);
+          if (seatCount !== existing.seatCount) {
+            const supplierCommissionCents = Math.round(offer.baseCents * offer.supplierCommissionPct / 100);
+            const agencyCommissionCents = Math.round(offer.baseCents * offer.agencyMarkupPct / 100);
+            const safarKaabeFeeCents = 1200;
+            const subtotalCents = offer.baseCents + offer.taxCents + agencyCommissionCents + safarKaabeFeeCents;
+            financials = {
+              ...financials,
+              supplierBaseCents: offer.baseCents * seatCount,
+              supplierTaxesCents: offer.taxCents * seatCount,
+              supplierCommissionCents: supplierCommissionCents * seatCount,
+              agencyCommissionCents: agencyCommissionCents * seatCount,
+              safarKaabeFeeCents: safarKaabeFeeCents * seatCount,
+              paymentFeeCents: 0,
+              customerGrandTotalCents: subtotalCents * seatCount,
+              netPayableToSupplierCents: (offer.baseCents + offer.taxCents - supplierCommissionCents) * seatCount,
+              recognizedPlatformRevenueCents: (safarKaabeFeeCents + supplierCommissionCents) * seatCount,
+              agencyMarkupPct: offer.agencyMarkupPct
+            };
+          }
+          const updated = await runInTransaction(async () => {
+            const seatDelta = seatCount - existing.seatCount;
+            if (seatDelta > 0) {
+              const inventory = await db.prepare(`UPDATE catalog_products SET available = available - ?
+                WHERE id = ? AND agency_id = ? AND available >= ? AND is_published = 1
+                  AND (travel_date IS NULL OR travel_date >= date('now'))
+                  AND EXISTS (SELECT 1 FROM agencies WHERE agencies.id = catalog_products.agency_id
+                    AND agencies.status = 'ACTIVE' AND agencies.is_approved = 1)`)
+                .run(seatDelta, existing.offerId, existing.agencyId, seatDelta);
+              if (inventory.changes !== 1) return null;
+            } else if (seatDelta < 0) {
+              const inventory = await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ? AND agency_id = ?')
+                .run(-seatDelta, existing.offerId, existing.agencyId);
+              if (inventory.changes !== 1) return null;
+            }
+            const changed = await db.prepare(`UPDATE bookings SET traveler_name = ?, traveler_email = ?, phone = ?,
+              seat_count = ?, travel_date = ?, financials_json = ?, updated_at = ?
+              WHERE id = ? AND state = 'REQUESTED' AND payment_provider = 'REQUEST_ONLY'`)
+              .run(travelerName, travelerEmail, phone, seatCount, travelDate, JSON.stringify(financials), nowIso(), bookingId);
+            if (changed.changes !== 1) {
+              throw Object.assign(new Error('This request has changed. Refresh the bookings list and try again.'), { statusCode: 409 });
+            }
+            return true;
+          });
+          if (!updated) {
             sendJson(response, 409, { error: 'This request has changed. Refresh the bookings list and try again.' });
             return;
           }
-          await audit(user.id, 'BOOKING_TRAVELER_DETAILS_UPDATED', `${existing.ref} (${existing.agencyId})`);
+          await audit(user.id, 'BOOKING_UPDATED', `${existing.ref} (${existing.agencyId})`);
+          if (seatCount !== existing.seatCount) publishCatalogChange('availability');
         } else if (body.action === 'REJECT') {
           if (existing.state !== 'REQUESTED' || existing.paymentProvider !== 'REQUEST_ONLY') {
             sendJson(response, 409, { error: 'Only an unpaid requested booking can be rejected.' });
@@ -3361,14 +4363,36 @@ async function handleApi(request, response, url) {
         return;
       }
 
-      const isNewUnpaidRequest = existing.state === 'REQUESTED' && existing.paymentProvider === 'REQUEST_ONLY';
+      const isNewUnpaidRequest = (existing.state === 'REQUESTED' && existing.paymentProvider === 'REQUEST_ONLY') ||
+        (existing.state === 'PAYMENT_PENDING' && existing.paymentStatus !== 'APPROVED');
       const isAcceptedBooking = existing.state === 'ACCEPTED';
+      if (user.role === 'CLIENT' && !isNewUnpaidRequest) {
+        sendJson(response, 409, { error: 'Only a pending unpaid booking request can be deleted. Contact the agency to cancel an approved or paid trip.' });
+        return;
+      }
       if (!isNewUnpaidRequest && !isAcceptedBooking) {
         sendJson(response, 409, { error: 'Only an open request or an accepted booking can be canceled here.' });
         return;
       }
       const body = await readJson(request);
       const reason = requireString(body.reason, 'Cancellation reason', 500).replace(/\s+/g, ' ');
+      if (existing.state === 'PAYMENT_PENDING' && existing.paymentReference) {
+        let checked;
+        try {
+          checked = await refreshWaafiPayment(existing.paymentReference);
+        } catch {
+          sendJson(response, 409, { error: 'We could not confirm with WaafiPay whether this payment went through. Try again in a few minutes.' });
+          return;
+        }
+        if (checked?.status === 'APPROVED') {
+          sendJson(response, 409, { error: 'WaafiPay has confirmed this payment, so the booking cannot be deleted here. Refresh the bookings list.' });
+          return;
+        }
+        if (checked?.status === 'DECLINED') {
+          sendJson(response, 200, { ok: true, message: 'The payment was not completed, so this request was cancelled and its seats are available again.', seatsReturned: true });
+          return;
+        }
+      }
       if (body.returnSeats !== undefined && typeof body.returnSeats !== 'boolean') {
         sendJson(response, 400, { error: 'Choose whether the seats can return to inventory.' });
         return;
@@ -3390,8 +4414,9 @@ async function handleApi(request, response, url) {
       const canceled = await runInTransaction(async () => {
         const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?
           WHERE id = ? AND agency_id = ? AND state = ? AND payment_provider = ?
+            AND (? = 1 OR NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED'))
           RETURNING seat_count AS seatCount`)
-          .get(reason, nowIso(), bookingId, existing.agencyId, existing.state, existing.paymentProvider);
+          .get(reason, nowIso(), bookingId, existing.agencyId, existing.state, existing.paymentProvider, paymentReceived ? 1 : 0);
         if (!canceledBooking) return null;
         let available = null;
         if (returnSeats) {
@@ -3442,21 +4467,30 @@ async function handleApi(request, response, url) {
           d.status AS ticketStatus, d.file_name AS ticketFileName, d.jpg_file_name AS ticketJpgFileName,
           d.issued_at AS ticketIssuedAt,
           CASE WHEN d.error_message IS NOT NULL OR COALESCE(d.layout_version, 1) < ${ticketLayoutVersion} THEN 1 ELSE 0 END AS ticketRetryAvailable,
-          d.email_delivery_status AS ticketEmailStatus, d.email_sent_at AS ticketEmailSentAt
+          d.email_delivery_status AS ticketEmailStatus, d.email_sent_at AS ticketEmailSentAt,
+          r.id AS reviewId, r.rating AS reviewRating, r.comment AS reviewComment,
+          r.agency_reply AS reviewReply, r.agency_reply_at AS reviewReplyAt, r.updated_at AS reviewUpdatedAt
         FROM bookings b
         JOIN agencies a ON a.id = b.agency_id
         LEFT JOIN catalog_products c ON c.id = b.offer_id
         LEFT JOIN booking_documents d ON d.booking_id = b.id AND d.document_type = 'BOOKING_CONFIRMATION'
+        LEFT JOIN agency_reviews r ON r.booking_id = b.id
         ${bookingScope}
         ORDER BY b.created_at DESC
       `).all(...bookingScopeValue);
-      sendJson(response, 200, { bookings: records.map(({ financials_json, ...booking }) => ({ ...booking, financials: JSON.parse(financials_json) })) });
+      const today = new Date().toISOString().slice(0, 10);
+      sendJson(response, 200, { bookings: records.map(({ financials_json, ...booking }) => ({
+        ...booking,
+        reviewRating: booking.reviewRating === null || booking.reviewRating === undefined ? null : Number(booking.reviewRating),
+        reviewEligible: user.role === 'CLIENT' && booking.customerId === user.id && canReviewBooking(booking, today),
+        financials: JSON.parse(financials_json)
+      })) });
       return;
     }
 
     if (pathname === '/api/bookings' && method === 'POST') {
       if (user) {
-        if (!requireRole(response, user, ['CLIENT', 'AGENCY'])) return;
+        if (!requireRole(response, user, ['CLIENT', 'AGENCY', 'SUPER_ADMIN'])) return;
         if (!authorizeMutation(request, response, session)) return;
       } else {
         const origin = request.headers.origin;
@@ -3474,6 +4508,13 @@ async function handleApi(request, response, url) {
         }
       }
       const body = await readJson(request);
+      const adminCustomer = user?.role === 'SUPER_ADMIN'
+        ? await db.prepare("SELECT id, name, email, phone FROM users WHERE id = ? AND role = 'CLIENT'").get(requireString(body.customerId, 'Traveler'))
+        : null;
+      if (user?.role === 'SUPER_ADMIN' && !adminCustomer) {
+        sendJson(response, 404, { error: 'Choose an existing traveler account for this booking.' });
+        return;
+      }
       const offerId = requireString(body.offerId, 'Travel offer', 80);
       const seatCount = body.seatCount === undefined ? 1 : Number(body.seatCount);
       if (!Number.isSafeInteger(seatCount) || seatCount < 1 || seatCount > 100000) {
@@ -3511,11 +4552,11 @@ async function handleApi(request, response, url) {
         sendJson(response, 503, { error: 'Online checkout is unavailable for this account. Choose a booking request or contact support.' });
         return;
       }
-      const travelerName = requireString(body.travelerName, 'Traveler name');
+      const travelerName = requireString(body.travelerName || adminCustomer?.name, 'Traveler name');
       const travelerEmail = user?.role === 'CLIENT'
         ? normalizeEmail(body.travelerEmail || user.email)
-        : normalizeEmail(body.travelerEmail || '');
-      const phone = requireString(body.phone, 'Phone', 40);
+        : normalizeEmail(body.travelerEmail || adminCustomer?.email || '');
+      const phone = requireString(body.phone || adminCustomer?.phone, 'Phone', 40);
       const baseCents = offer.base_cents;
       const taxCents = offer.tax_cents;
       const supplierCommissionCents = Math.round(baseCents * offer.supplier_commission_pct / 100);
@@ -3541,7 +4582,7 @@ async function handleApi(request, response, url) {
         pnr: `REQ-SK-${randomCode()}`,
         agencyId: offer.agency_id,
         offerId: offer.id,
-        customerId: user?.role === 'CLIENT' ? user.id : null,
+        customerId: user?.role === 'CLIENT' ? user.id : user?.role === 'SUPER_ADMIN' ? adminCustomer.id : null,
         travelerName,
         travelerEmail,
         phone,
@@ -3597,6 +4638,7 @@ async function handleApi(request, response, url) {
           paymentStart = { referenceId, hppUrl, orderId: params.orderId ? String(params.orderId) : null };
         } catch (error) {
           await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ?').run(seatCount, offer.id);
+          publishCatalogChange('availability');
           throw error;
         }
       }
@@ -3671,6 +4713,7 @@ async function handleApi(request, response, url) {
         });
       } catch (error) {
         await db.prepare('UPDATE catalog_products SET available = available + ? WHERE id = ?').run(seatCount, offer.id);
+        publishCatalogChange('availability');
         throw error;
       }
       for (const notification of bookingNotifications) {
@@ -3720,6 +4763,74 @@ async function handleApi(request, response, url) {
         throw error;
       }
       sendJson(response, 201, { agency: { id, name, tier, markupPct: markup, status: 'PENDING' }, owner: { id: ownerId, name: ownerName, email: ownerEmail, role: 'AGENCY' } });
+      return;
+    }
+
+    if (pathname === '/api/admin/customers' && method === 'POST') {
+      if (!requireRole(response, user, ['SUPER_ADMIN'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const body = await readJson(request);
+      const name = requireString(body.name, 'Traveler name');
+      const email = normalizeEmail(body.email);
+      const phone = requireString(body.phone, 'Phone number', 40);
+      const password = validatePassword(body.password || '');
+      const credentials = await hashPassword(password);
+      const customer = { id: crypto.randomUUID(), name, email, phone, createdAt: nowIso() };
+      try {
+        await db.prepare('INSERT INTO users (id, email, name, phone, password_salt, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(customer.id, customer.email, customer.name, customer.phone, credentials.salt, credentials.hash, 'CLIENT', customer.createdAt);
+      } catch (error) {
+        if (String(error.message).includes('UNIQUE constraint failed')) {
+          sendJson(response, 409, { error: 'A traveler account with that email already exists.' });
+          return;
+        }
+        throw error;
+      }
+      await audit(user.id, 'CLIENT_ACCOUNT_CREATED', `${name} (${email})`);
+      sendJson(response, 201, { customer });
+      return;
+    }
+
+    const adminCustomerMatch = pathname.match(/^\/api\/admin\/customers\/([0-9a-f-]+)$/i);
+    if (adminCustomerMatch && ['PATCH', 'DELETE'].includes(method)) {
+      if (!requireRole(response, user, ['SUPER_ADMIN'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const customer = await db.prepare("SELECT id, name, email, phone, password_hash, password_salt FROM users WHERE id = ? AND role = 'CLIENT'").get(adminCustomerMatch[1]);
+      if (!customer) {
+        sendJson(response, 404, { error: 'Traveler account not found.' });
+        return;
+      }
+      if (method === 'PATCH') {
+        const body = await readJson(request);
+        const name = body.name === undefined ? customer.name : requireString(body.name, 'Traveler name');
+        const phone = body.phone === undefined ? customer.phone : requireString(body.phone, 'Phone number', 40);
+        const email = body.email === undefined ? customer.email : normalizeEmail(body.email);
+        const password = body.password === undefined ? null : validatePassword(body.password);
+        const currentEmail = customer.email;
+        try {
+          if (password) {
+            const credentials = await hashPassword(password);
+            await db.prepare('UPDATE users SET email = ?, name = ?, phone = ?, password_salt = ?, password_hash = ? WHERE id = ?')
+              .run(email, name, phone, credentials.salt, credentials.hash, customer.id);
+          } else {
+            await db.prepare('UPDATE users SET email = ?, name = ?, phone = ? WHERE id = ?')
+              .run(email, name, phone, customer.id);
+          }
+        } catch (error) {
+          if (String(error.message).includes('UNIQUE constraint failed')) {
+            sendJson(response, 409, { error: 'A traveler account with that email already exists.' });
+            return;
+          }
+          throw error;
+        }
+        await audit(user.id, 'CLIENT_ACCOUNT_UPDATED', `${name} (${currentEmail} → ${email})`);
+        const updated = await db.prepare("SELECT id, name, email, phone, avatar_mime AS avatarMime, avatar_data AS avatarData, created_at AS createdAt FROM users WHERE id = ? AND role = 'CLIENT'").get(customer.id);
+        sendJson(response, 200, { customer: updated });
+        return;
+      }
+      await db.prepare("DELETE FROM users WHERE id = ? AND role = 'CLIENT'").run(customer.id);
+      await audit(user.id, 'CLIENT_ACCOUNT_DELETED', `${customer.name} (${customer.email})`);
+      sendJson(response, 200, { ok: true });
       return;
     }
 
@@ -3814,7 +4925,7 @@ async function handleApi(request, response, url) {
       return;
     }
 
-    sendJson(response, 404, { error: 'API route not found.' });
+    sendJson(response, 404, { error: 'This page or action is not available. Refresh the app and try again.' });
     return;
   }
 
@@ -3839,11 +4950,45 @@ async function handleApi(request, response, url) {
       response.writeHead(404).end('Not found');
       return;
     }
-    response.writeHead(200, {
+    const headers = {
       'Content-Type': mimeType(filePath),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': ['the style.html', 'sw.js'].includes(path.basename(filePath)) ? 'no-cache' : 'public, max-age=3600'
-    });
+    };
+    const isVideo = path.extname(filePath).toLowerCase() === '.mp4';
+    const range = isVideo ? request.headers.range : null;
+    if (isVideo) headers['Accept-Ranges'] = 'bytes';
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      let start;
+      let end;
+      if (match && (match[1] || match[2])) {
+        if (!match[1]) {
+          const suffixLength = Number(match[2]);
+          if (Number.isSafeInteger(suffixLength) && suffixLength > 0) {
+            start = Math.max(stats.size - suffixLength, 0);
+            end = stats.size - 1;
+          }
+        } else {
+          start = Number(match[1]);
+          end = match[2] ? Number(match[2]) : stats.size - 1;
+        }
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= stats.size || end < start) {
+        response.writeHead(416, { 'Accept-Ranges': 'bytes', 'Content-Range': `bytes */${stats.size}` }).end();
+        return;
+      }
+      end = Math.min(end, stats.size - 1);
+      response.writeHead(206, {
+        ...headers,
+        'Content-Length': end - start + 1,
+        'Content-Range': `bytes ${start}-${end}/${stats.size}`
+      });
+      fs.createReadStream(filePath, { start, end }).pipe(response);
+      return;
+    }
+    if (isVideo) headers['Content-Length'] = stats.size;
+    response.writeHead(200, headers);
     fs.createReadStream(filePath).pipe(response);
   });
 }
