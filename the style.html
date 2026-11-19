@@ -4974,6 +4974,21 @@
       else syncThemeControls();
     }
 
+    // When the app is shown inside the ANFAC Media website, payment pages must open in the whole window
+    // (payment providers do not allow being shown inside another page).
+    function openPaymentPage(url) {
+      if (window.self !== window.top) {
+        try {
+          window.top.location.href = url;
+          return;
+        } catch (error) {
+          const opened = window.open(url, '_blank', 'noopener');
+          if (opened) return;
+        }
+      }
+      window.location.assign(url);
+    }
+
     // ---------- Refunds ----------
     function refundBadge(booking, travelerView = false) {
       if (['NEEDED', 'SENDING', 'UNCONFIRMED'].includes(booking?.refundStatus)) {
@@ -7872,7 +7887,7 @@
           return;
         }
         if (paymentUrl) {
-          window.location.assign(paymentUrl);
+          openPaymentPage(paymentUrl);
           return;
         }
         if (currentUser?.role === 'CLIENT' && conversationId) {

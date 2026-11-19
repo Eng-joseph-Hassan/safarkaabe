@@ -6129,8 +6129,13 @@ async function handleApi(request, response, url) {
   });
 }
 
+const appFrameAncestors = (process.env.APP_FRAME_ANCESTORS || "'self' https://anfacmedia.com https://*.anfacmedia.com")
+  .replace(/[;\r\n]/g, ' ').trim();
+
 async function handleRequest(request, response) {
   response.setHeader('X-Content-Type-Options', 'nosniff');
+  // Only the app itself and the ANFAC Media website may show the app inside a page (stops clickjacking elsewhere).
+  response.setHeader('Content-Security-Policy', `frame-ancestors ${appFrameAncestors}`);
   response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   let requestPath = '/';
   try {
