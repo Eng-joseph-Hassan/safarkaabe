@@ -22,6 +22,7 @@ html = html.replace(/\s*<script defer src="\/plugins\/all\.js"><\/script>/, '');
 if (/["'`]\/api\//.test(html)) throw new Error('build-app: an absolute /api/ address is left in the page');
 if (/vercel\.app/i.test(html)) throw new Error('build-app: the page still mentions vercel.app');
 html = replaceAll(html, "document.getElementById('callAlertsBanner')?.classList.remove('hidden');", '/* Phone alerts are not available on the website version. */', 'call alerts banner');
+html = replaceAll(html, 'placeholder="Enter the token configured in Vercel"', 'placeholder="Find it in WordPress admin → SAFAR KAABE"', 'setup token hint');
 fs.writeFileSync(path.join(out, 'index.html'), html);
 
 let sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');

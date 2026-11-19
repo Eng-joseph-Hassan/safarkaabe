@@ -3,7 +3,7 @@
  * Plugin Name:       SAFAR KAABE
  * Plugin URI:        https://anfacmedia.com/safarkaabe/
  * Description:       The SAFAR KAABE travel marketplace running inside WordPress at /safarkaabe/ – travel agencies, trips, bookings, chat and payments. Data is kept in your own WordPress database. No outside server.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            ANFAC Media
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 define( 'SKW_RUNNING', true );
-define( 'SKW_VERSION', '1.0.0' );
+define( 'SKW_VERSION', '1.0.1' );
 define( 'SKW_FILE', __FILE__ );
 define( 'SKW_DIR', plugin_dir_path( __FILE__ ) );
 

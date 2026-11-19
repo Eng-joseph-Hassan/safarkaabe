@@ -3,7 +3,7 @@ Contributors: anfacmedia
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 
 The SAFAR KAABE travel marketplace running fully inside WordPress at /safarkaabe/ – like ANFAC System runs at /system/.
@@ -63,6 +63,9 @@ In your WordPress database, in the tables that start with wp_sk_. Deleting the p
 No. This plugin is a separate, complete copy that runs only on your website.
 
 == Changelog ==
+
+= 1.0.1 =
+* The setup token hint now points to WordPress admin.
 
 = 1.0.0 =
 * First release.
