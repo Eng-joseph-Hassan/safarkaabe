@@ -16,7 +16,7 @@ function skw_schema() {
 				'id' => 'id', 'email' => 'key', 'name' => 'str', 'phone' => 'str', 'password_hash' => 'str',
 				'role' => 'key', 'agency_id' => 'id NULL', 'avatar_mime' => 'str NULL', 'avatar_data' => 'text NULL',
 				'presence_status' => "key DEFAULT 'AVAILABLE'", 'last_seen_at' => 'date NULL', 'typing_conversation_id' => 'id NULL',
-				'typing_until' => 'date NULL', 'theme_preference' => 'key NULL', 'created_at' => 'date',
+				'typing_until' => 'date NULL', 'theme_preference' => 'key NULL', 'login_code_enabled' => 'int DEFAULT 0', 'created_at' => 'date',
 			),
 			'pk'      => 'id',
 			'unique'  => array( 'email' ),
@@ -162,6 +162,33 @@ function skw_schema() {
 			),
 			'pk'    => 'id',
 			'index' => array( 'user_id', 'expires_at' ),
+		),
+		'chat_status_replies'   => array(
+			'cols'  => array( 'id' => 'id', 'status_id' => 'id', 'user_id' => 'id', 'body' => 'text', 'created_at' => 'date' ),
+			'pk'    => 'id',
+			'index' => array( 'status_id' ),
+		),
+		'chat_status_reactions' => array(
+			'cols' => array( 'status_id' => 'id', 'user_id' => 'id', 'emoji' => 'str', 'created_at' => 'date' ),
+			'pk'   => 'status_id, user_id',
+		),
+		'chat_communities'      => array(
+			'cols' => array( 'id' => 'id', 'name' => 'str', 'description' => 'text NULL', 'created_by' => 'id', 'created_at' => 'date' ),
+			'pk'   => 'id',
+		),
+		'chat_community_members' => array(
+			'cols' => array( 'community_id' => 'id', 'user_id' => 'id', 'joined_at' => 'date' ),
+			'pk'   => 'community_id, user_id',
+		),
+		'chat_community_messages' => array(
+			'cols'  => array( 'id' => 'id', 'community_id' => 'id', 'sender_id' => 'id', 'body' => 'text', 'created_at' => 'date', 'edited_at' => 'date NULL' ),
+			'pk'    => 'id',
+			'index' => array( 'community_id' ),
+		),
+		'login_challenges'      => array(
+			'cols'  => array( 'id' => 'key', 'user_id' => 'id', 'code_hash' => 'str', 'expires_at' => 'int', 'attempts' => 'int DEFAULT 0', 'created_at' => 'int' ),
+			'pk'    => 'id',
+			'index' => array( 'user_id' ),
 		),
 		'chat_status_views'     => array(
 			'cols' => array( 'status_id' => 'id', 'viewer_id' => 'id', 'viewed_at' => 'date', 'reaction' => 'str NULL' ),

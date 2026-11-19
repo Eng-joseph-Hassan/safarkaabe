@@ -46,8 +46,12 @@ function skw_booking_view( $b, $user = null ) {
 		'routeBadge' => isset( $b['route_badge'] ) ? $b['route_badge'] : null, 'destination' => isset( $b['destination'] ) ? $b['destination'] : null,
 		'supplierName' => isset( $b['supplier_name'] ) ? $b['supplier_name'] : null, 'supplierRef' => isset( $b['supplier_ref'] ) ? $b['supplier_ref'] : null,
 		'baggage' => isset( $b['baggage'] ) ? $b['baggage'] : null, 'specs' => isset( $b['specs'] ) ? $b['specs'] : null,
-		'ticketDocumentId' => null, 'ticketDocumentReference' => null, 'ticketDocumentVersion' => null, 'ticketDocumentType' => null, 'ticketStatus' => null,
-		'ticketFileName' => null, 'ticketJpgFileName' => null, 'ticketIssuedAt' => null, 'ticketRetryAvailable' => 0, 'ticketEmailStatus' => null, 'ticketEmailSentAt' => null,
+		'ticketDocumentId' => 'ACCEPTED' === $b['state'] ? 'voucher-' . $b['id'] : null, 'ticketDocumentReference' => 'ACCEPTED' === $b['state'] ? 'SKV-' . substr( $b['reference'], 3 ) : null,
+		'ticketDocumentVersion' => 'ACCEPTED' === $b['state'] ? 1 : null, 'ticketDocumentType' => 'ACCEPTED' === $b['state'] ? 'BOOKING_CONFIRMATION' : null,
+		'ticketStatus' => 'ACCEPTED' === $b['state'] ? 'READY' : null,
+		'ticketFileName' => 'ACCEPTED' === $b['state'] ? 'SAFAR-KAABE-Booking-Voucher-' . $b['reference'] . '.pdf' : null,
+		'ticketJpgFileName' => 'ACCEPTED' === $b['state'] ? 'SAFAR-KAABE-Booking-Voucher-' . $b['reference'] . '.jpg' : null,
+		'ticketIssuedAt' => 'ACCEPTED' === $b['state'] ? $b['updated_at'] : null, 'ticketRetryAvailable' => 0, 'ticketEmailStatus' => null, 'ticketEmailSentAt' => null,
 		'reviewId' => isset( $b['review_id'] ) ? $b['review_id'] : null, 'reviewRating' => isset( $b['review_rating'] ) && null !== $b['review_rating'] ? (int) $b['review_rating'] : null,
 		'reviewComment' => isset( $b['review_comment'] ) ? $b['review_comment'] : null, 'reviewReply' => isset( $b['review_reply'] ) ? $b['review_reply'] : null,
 		'reviewReplyAt' => isset( $b['review_reply_at'] ) ? $b['review_reply_at'] : null, 'reviewUpdatedAt' => isset( $b['review_updated_at'] ) ? $b['review_updated_at'] : null,
@@ -296,6 +300,9 @@ function skw_booking_patch( $b, $user ) {
 			throw new SKW_Http_Error( 409, 'This request has changed. Refresh the bookings list and try again.' );
 		}
 		skw_audit( $user['id'], 'BOOKING_REQUEST_ACCEPTED', $b['reference'] . ' (' . $b['agency_id'] . ')' );
+		if ( function_exists( 'skw_ticket_email_on_accept' ) ) {
+			skw_ticket_email_on_accept( $b['id'] );
+		}
 		skw_notify( array( array( 'recipientUserId' => $b['customer_id'], 'agencyId' => $b['agency_id'], 'bookingId' => $b['id'], 'type' => 'BOOKING_ACCEPTED',
 			'title' => 'Booking confirmed', 'body' => $b['agency_name'] . ' confirmed your booking ' . $b['reference'] . ' for ' . $b['offer_title'] . '.',
 			'href' => skw_app_link( '?booking=' . rawurlencode( $b['id'] ) ), 'dedupeKey' => 'BOOKING_ACCEPTED:' . $b['id'] ) ) );
@@ -390,7 +397,8 @@ function skw_booking_patch( $b, $user ) {
 	} else {
 		throw new SKW_Http_Error( 400, 'Choose accept, undo acceptance, edit, reject, restore, or record a refund for this booking.' );
 	}
-	return array( 'booking' => skw_booking_view( skw_load_booking( $b['id'] ), $user ), 'ticket' => null, 'ticketError' => null );
+	$after = skw_load_booking( $b['id'] );
+	return array( 'booking' => skw_booking_view( $after, $user ), 'ticket' => function_exists( 'skw_ticket_info' ) ? skw_ticket_info( $after ) : null, 'ticketError' => null );
 }
 
 function skw_booking_cancel( $b, $user ) {
@@ -443,11 +451,6 @@ function skw_booking_cancel( $b, $user ) {
 	return array( 'ok' => true, 'message' => $message, 'offerId' => $return ? $b['offer_id'] : null, 'available' => $available, 'seatsReturned' => $return, 'paymentNeedsRefund' => $paid );
 }
 
-/* ---------- Booking confirmation (simple printable page instead of a PDF) ---------- */
-
-SKW_Router::add( '*', '#^/api/bookings/([0-9a-z-]+)/ticket(\.pdf|\.jpg|/generate|/email)?$#i', function () {
-	throw new SKW_Http_Error( 404, 'The booking document is not ready yet. Your booking details are shown in My Trips.' );
-} );
 
 /* ---------- Reviews ---------- */
 

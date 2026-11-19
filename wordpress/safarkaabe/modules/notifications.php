@@ -114,20 +114,6 @@ SKW_Router::add( '*', '#^/api/push/(subscriptions|native-tokens)$#', function ()
 	return array( 'ok' => true, 'configured' => false );
 } );
 
-/* ---------- Status updates and communities (not on this website yet) ---------- */
-
-SKW_Router::add( 'GET', '#^/api/statuses$#', function () {
-	skw_require_role();
-	return array( 'statuses' => array() );
-} );
-SKW_Router::add( 'GET', '#^/api/communities$#', function () {
-	skw_require_role();
-	return array( 'communities' => array() );
-} );
-SKW_Router::add( '*', '#^/api/(statuses|communities)(/.*)?$#', function () {
-	skw_require_role();
-	throw new SKW_Http_Error( 503, 'This feature is coming soon to the website version of SAFAR KAABE.' );
-} );
 
 /* ---------- Calls ---------- */
 

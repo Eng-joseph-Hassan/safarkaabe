@@ -274,6 +274,76 @@ check( 'sales report CSV', 200 === $s && false !== strpos( $csv, 'Booking number
 list( $s ) = call( 'GET', 'api/reports/sales', null, $payer );
 check( 'travelers cannot see reports', 403 === $s );
 
+// Booking confirmation (voucher)
+list( $s, $b ) = call( 'POST', 'api/bookings', array( 'offerId' => $trip['id'], 'travelerName' => 'Other Person', 'phone' => '+252610000002' ), $other );
+$tb = $b['booking']['id'];
+list( $s, $b ) = call( 'GET', 'api/bookings/' . $tb . '/ticket', null, $other );
+check( 'no voucher before confirmation', 200 === $s && null === $b['ticket'] );
+list( $s, $b ) = call( 'PATCH', 'api/bookings/' . $tb, array( 'action' => 'ACCEPT' ), $staff );
+check( 'confirmation returns the voucher', 200 === $s && 'READY' === $b['ticket']['status'] && 'READY' === $b['booking']['ticketStatus'], json_encode( $b ) );
+$mails = array_map( 'json_decode', array_filter( explode( "\n", (string) @file_get_contents( $mail ) ) ) );
+check( 'traveler emailed on confirmation', false !== strpos( (string) end( $mails )->subject, 'confirmed' ) && 'other@example.test' === end( $mails )->to );
+list( $s, $pdf, $head ) = call( 'GET', 'api/bookings/' . $tb . '/ticket.pdf', null, $other, true );
+check( 'voucher PDF', 200 === $s && 0 === strpos( $pdf, '%PDF-1.4' ) && false !== strpos( $pdf, '%%EOF' ) && false !== stripos( $head, 'application/pdf' ) );
+list( $s, $jpg ) = call( 'GET', 'api/bookings/' . $tb . '/ticket.jpg', null, $other, true );
+check( 'voucher image (or a clear message without GD)', ( 200 === $s && "\xff\xd8" === substr( $jpg, 0, 2 ) ) || 404 === $s, (string) $s );
+list( $s, $b ) = call( 'POST', 'api/bookings/' . $tb . '/ticket/email', array(), $other );
+check( 'voucher emailed on request', 200 === $s && 'SENT' === $b['ticket']['emailDeliveryStatus'] );
+list( $s ) = call( 'GET', 'api/bookings/' . $tb . '/ticket.pdf', null, $payer, true );
+check( 'other travelers cannot open the voucher', 404 === $s );
+
+// Status updates
+$jpeg = 'data:image/jpeg;base64,' . base64_encode( "\xff\xd8" . str_repeat( 'x', 50 ) . "\xff\xd9" );
+list( $s, $b ) = call( 'POST', 'api/statuses', array( 'body' => 'Flying to Mogadishu tomorrow!', 'attachmentData' => $jpeg, 'attachmentMime' => 'image/jpeg' ), $staff );
+check( 'status posted', 201 === $s, json_encode( $b ) );
+$st = $b['status']['id'];
+list( $s, $b ) = call( 'GET', 'api/statuses', null, $payer );
+check( 'others see the status', 200 === $s && 1 === count( $b['statuses'] ) && 'Flying to Mogadishu tomorrow!' === $b['statuses'][0]['body'] );
+call( 'POST', 'api/statuses/' . $st . '/views', array(), $payer );
+list( $s, $b ) = call( 'POST', 'api/statuses/' . $st . '/reactions', array( 'emoji' => '😍' ), $payer );
+check( 'reaction saved', 200 === $s && '😍' === $b['reaction'] );
+list( $s ) = call( 'POST', 'api/statuses/' . $st . '/replies', array( 'body' => 'Safe travels!' ), $payer );
+check( 'reply sent', 201 === $s );
+list( $s, $b ) = call( 'GET', 'api/statuses/' . $st . '/views', null, $staff );
+check( 'owner sees viewers with reaction', 200 === $s && 1 === $b['viewCount'] && '😍' === $b['viewers'][0]['reaction'] );
+list( $s, $img ) = call( 'GET', 'api/statuses/' . $st . '/attachment', null, $payer, true );
+check( 'status photo', 200 === $s && "\xff\xd8" === substr( $img, 0, 2 ) );
+list( $s ) = call( 'PATCH', 'api/statuses/' . $st, array( 'audience' => 'CONTACTS' ), $staff );
+$stranger = array();
+call( 'POST', 'api/auth/register', array( 'name' => 'New Visitor', 'email' => 'visitor@example.test', 'phone' => '+252610000009', 'password' => 'long-enough-traveler-password' ), $stranger );
+list( $s, $b ) = call( 'GET', 'api/statuses', null, $stranger );
+check( 'contacts-only status hidden from non-contacts', 0 === count( $b['statuses'] ), json_encode( $b ) );
+list( $s, $b ) = call( 'GET', 'api/statuses', null, $payer );
+check( 'contacts-only status still shown to a contact', 1 === count( $b['statuses'] ) );
+list( $s ) = call( 'DELETE', 'api/statuses/' . $st, array(), $payer );
+check( 'only the owner can delete a status', 403 === $s || 404 === $s );
+
+// Communities
+list( $s, $b ) = call( 'POST', 'api/communities', array( 'name' => 'Hajj travelers 2027', 'description' => 'Tips and questions' ), $admin );
+check( 'community created', 201 === $s, json_encode( $b ) );
+$cm = $b['community']['id'];
+list( $s ) = call( 'GET', 'api/communities/' . $cm . '/messages', null, $payer );
+check( 'join before reading', 403 === $s );
+call( 'POST', 'api/communities/' . $cm . '/join', array(), $payer );
+list( $s ) = call( 'POST', 'api/communities/' . $cm . '/messages', array( 'message' => 'Salaan everyone!' ), $payer );
+check( 'member posts', 201 === $s );
+list( $s, $b ) = call( 'GET', 'api/communities', null, $payer );
+check( 'community listed with last message', 200 === $s && 'Salaan everyone!' === $b['communities'][0]['lastMessage'] && 2 === $b['communities'][0]['memberCount'] );
+
+// Sign-in codes by email
+list( $s, $b ) = call( 'PATCH', 'api/auth/login-code', array( 'enabled' => true, 'password' => 'long-enough-traveler-password' ), $payer );
+check( 'sign-in codes turned on', 200 === $s && true === $b['user']['loginCodeEnabled'], json_encode( $b ) );
+$fresh = array();
+list( $s, $b ) = call( 'POST', 'api/auth/login', array( 'email' => 'payer@example.test', 'password' => 'long-enough-traveler-password' ), $fresh );
+check( 'login asks for a code', 200 === $s && true === $b['loginCodeRequired'] && ! isset( $fresh['sk_session'] ) );
+$challenge = $b['challengeId'];
+$mails = array_map( 'json_decode', array_filter( explode( "\n", (string) @file_get_contents( $mail ) ) ) );
+$code  = preg_match( '/sign-in code is (\d{6})/', (string) end( $mails )->text, $m ) ? $m[1] : '';
+list( $s ) = call( 'POST', 'api/auth/login/verify', array( 'challengeId' => $challenge, 'code' => '000000' === $code ? '111111' : '000000' ), $fresh );
+check( 'wrong code refused', 400 === $s );
+list( $s, $b ) = call( 'POST', 'api/auth/login/verify', array( 'challengeId' => $challenge, 'code' => $code ), $fresh );
+check( 'right code signs in', 200 === $s && isset( $fresh['sk_session'] ), json_encode( $b ) );
+
 // Graceful answers for features not on the website yet
 foreach ( array( 'api/statuses', 'api/communities', 'api/notification-preferences', 'api/push/public-key', 'api/calls/history', 'api/blocks', 'api/payments/methods', 'api/app-version' ) as $path ) {
 	list( $s ) = call( 'GET', $path, null, $staff );

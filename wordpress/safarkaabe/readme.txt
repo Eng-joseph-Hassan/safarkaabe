@@ -3,7 +3,7 @@ Contributors: anfacmedia
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.1.0
 License: GPLv2 or later
 
 The SAFAR KAABE travel marketplace running fully inside WordPress at /safarkaabe/ – like ANFAC System runs at /system/.
@@ -31,15 +31,17 @@ Included:
   * An unclear answer from the payment provider is shown to the agency as "check your merchant portal", never as failed.
 * Chat between travelers, agencies and support, with photos, voice messages, read ticks, typing, blocking, and voice and video calls.
 * Notifications in the app, notification settings, sales reports with Excel (CSV) download, and an activity history.
+* Booking confirmation: a branded PDF voucher and a phone-friendly image. It is emailed to the traveler automatically when the agency confirms.
+* Status updates (24 hours, for Everyone or Contacts only) with views, replies and reactions, and communities (group chats).
+* Sign-in codes by email: two-step sign-in that users can turn on in their profile.
+* Trips on any page of your website: `[safarkaabe_trips limit="6"]`, `[safarkaabe_trips category="FLIGHT" title="Flights from Baidoa"]` and `[safarkaabe_button]`.
+* Optional "SAFAR KAABE" link in your site menu.
 * Light and dark mode, English and Somali, and installable on phones.
 
 Not on the website version yet:
 
-* Status updates and communities.
 * Phone push alerts while the app is closed.
-* PDF tickets (booking details are shown in My Trips).
 * Automatic refunds (the agency sends the money and records the refund).
-* Sign-in codes by email.
 
 == Installation ==
 
@@ -47,7 +49,8 @@ Not on the website version yet:
 2. Go to **WordPress → SAFAR KAABE**. Copy the one-time **setup token**.
 3. Open **https://YOUR-SITE/safarkaabe/** and choose "Create Super Admin". Enter your name, email, a password of at least 12 characters, and the setup token.
 4. Optional: add your WaafiPay and/or eDahab API keys in WordPress → SAFAR KAABE to turn on pay by phone.
-5. Add the app to your site menu: Appearance → Menus → Custom Link → `/safarkaabe/`.
+5. Add the app to your site menu: tick "Add SAFAR KAABE to my website menu" in WordPress → SAFAR KAABE (or Appearance → Menus → Custom Link → `/safarkaabe/`).
+6. Show trips on your home page: add the shortcode `[safarkaabe_trips limit="6" title="Book your next trip"]`.
 
 If /safarkaabe/ shows another page:
 * Go to Settings → Permalinks → Save Changes.
@@ -63,6 +66,13 @@ In your WordPress database, in the tables that start with wp_sk_. Deleting the p
 No. This plugin is a separate, complete copy that runs only on your website.
 
 == Changelog ==
+
+= 1.1.0 =
+* New: booking confirmation PDF and image, emailed on confirmation.
+* New: status updates and communities.
+* New: sign-in codes by email.
+* New: trips showcase shortcodes and an optional site menu link.
+* Admin page shows the latest bookings.
 
 = 1.0.1 =
 * The setup token hint now points to WordPress admin.

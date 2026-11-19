@@ -22,7 +22,7 @@ function skw_public_user( $u ) {
 		'avatarData'       => ! empty( $u['avatar_data'] ) ? $u['avatar_data'] : null,
 		'presenceStatus'   => ! empty( $u['presence_status'] ) ? $u['presence_status'] : 'AVAILABLE',
 		'lastSeenAt'       => ! empty( $u['last_seen_at'] ) ? $u['last_seen_at'] : null,
-		'loginCodeEnabled' => false,
+		'loginCodeEnabled' => isset( $u['login_code_enabled'] ) && 1 === (int) $u['login_code_enabled'],
 		'themePreference'  => isset( $u['theme_preference'] ) && in_array( $u['theme_preference'], array( 'light', 'dark', 'system' ), true ) ? $u['theme_preference'] : null,
 	);
 }

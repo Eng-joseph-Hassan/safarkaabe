@@ -98,6 +98,7 @@ function skw_wp_admin_page() {
 			}
 			$current[ $f ] = $v;
 		}
+		$current['menu_link']      = empty( $_POST['menu_link'] ) ? 0 : 1;
 		$current['waafi_enabled']  = empty( $_POST['waafi_enabled'] ) ? 0 : 1;
 		$current['edahab_enabled'] = empty( $_POST['edahab_enabled'] ) ? 0 : 1;
 		update_option( 'skw_settings', $current, false );
@@ -136,6 +137,7 @@ function skw_wp_admin_page() {
 			. ( $secret ? '<p class="description">' . esc_html( $v( $k ) ? 'Saved. Leave empty to keep it.' : 'Not set.' ) . '</p>' : '' ) . '</td></tr>';
 	};
 	echo '<h2>Settings</h2><table class="form-table">';
+	echo '<tr><th>Site menu</th><td><label><input type="checkbox" name="menu_link" value="1" ' . checked( 1, (int) $v( 'menu_link' ), false ) . ' /> Add "SAFAR KAABE" to my website menu</label></td></tr>';
 	$field( 'notification_email', 'Email for new bookings', 'email' );
 	echo '<tr><th>Pay by phone – WaafiPay (EVC Plus, Zaad, Sahal)</th><td><label><input type="checkbox" name="waafi_enabled" value="1" ' . checked( 1, (int) $v( 'waafi_enabled' ), false ) . ' /> On</label></td></tr>';
 	$field( 'waafi_merchant_uid', 'WaafiPay merchant UID' );
@@ -147,5 +149,17 @@ function skw_wp_admin_page() {
 	$field( 'edahab_api_key', 'eDahab API key' );
 	$field( 'edahab_secret_key', 'eDahab secret key' );
 	echo '</table><p><button class="button button-primary" name="skw_save" value="1">Save</button></p></form>';
+	echo '<h2>Show trips on your website</h2><p>Put these in any page or post:</p><ul style="list-style:disc;margin-left:20px">'
+		. '<li><code>[safarkaabe_trips limit="6"]</code> – trip cards with photos, prices and a "Book now" button</li>'
+		. '<li><code>[safarkaabe_trips limit="9" category="FLIGHT" title="Flights from Baidoa"]</code> – only one type (FLIGHT, HOTEL, TOUR, CAR, TRANSFER, PACKAGE) with a heading</li>'
+		. '<li><code>[safarkaabe_button text="Book your trip"]</code> – a button that opens the app</li></ul>';
+	$recent = SKW_DB::get_results( 'SELECT b.reference, b.traveler_name, b.offer_title, b.state, b.created_at, a.name AS agency FROM {bookings} b JOIN {agencies} a ON a.id = b.agency_id ORDER BY b.created_at DESC LIMIT 8' );
+	if ( $recent ) {
+		echo '<h2>Latest bookings</h2><table class="widefat striped" style="max-width:900px"><thead><tr><th>Booking</th><th>Traveler</th><th>Trip</th><th>Agency</th><th>Status</th><th>Date</th></tr></thead><tbody>';
+		foreach ( $recent as $r ) {
+			echo '<tr><td>' . esc_html( $r['reference'] ) . '</td><td>' . esc_html( $r['traveler_name'] ) . '</td><td>' . esc_html( $r['offer_title'] ) . '</td><td>' . esc_html( $r['agency'] ) . '</td><td>' . esc_html( ucwords( strtolower( str_replace( '_', ' ', $r['state'] ) ) ) ) . '</td><td>' . esc_html( substr( $r['created_at'], 0, 10 ) ) . '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
 	echo '<p>Data is stored in your WordPress database (tables ' . esc_html( SKW_DB::table( '*' ) ) . '). If the app page shows another page, go to Settings → Permalinks → Save, then clear your site cache.</p></div>';
 }

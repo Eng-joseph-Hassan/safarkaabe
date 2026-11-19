@@ -106,18 +106,58 @@ SKW_Router::add( 'POST', '#^/api/auth/login$#', function () {
 		throw new SKW_Http_Error( 403, 'This agency account is pending approval or suspended. Contact SAFAR KAABE support.' );
 	}
 	skw_rate_clear( $key );
+	if ( 1 === (int) $account['login_code_enabled'] ) {
+		$code  = (string) random_int( 100000, 999999 );
+		$token = rtrim( strtr( base64_encode( random_bytes( 24 ) ), '+/', '-_' ), '=' );
+		SKW_DB::query( 'DELETE FROM {login_challenges} WHERE user_id = ? OR expires_at < ?', array( $account['id'], time() ) );
+		SKW_DB::insert( 'login_challenges', array( 'id' => hash( 'sha256', $token ), 'user_id' => $account['id'], 'code_hash' => password_hash( $code, PASSWORD_DEFAULT ), 'expires_at' => time() + 600, 'attempts' => 0, 'created_at' => time() ) );
+		if ( ! skw_mail( $account['email'], 'Your SAFAR KAABE sign-in code', 'Your SAFAR KAABE sign-in code is ' . $code . '. It expires in 10 minutes. If you did not just try to sign in, change your password now.' ) ) {
+			SKW_DB::query( 'DELETE FROM {login_challenges} WHERE user_id = ?', array( $account['id'] ) );
+			throw new SKW_Http_Error( 503, 'We could not email your sign-in code. Try again in a few minutes.' );
+		}
+		list( $name, $domain ) = array_pad( explode( '@', $account['email'], 2 ), 2, '' );
+		return array( 'loginCodeRequired' => true, 'challengeId' => $token, 'emailHint' => mb_substr( $name, 0, 2 ) . str_repeat( '•', max( 1, min( 6, mb_strlen( $name ) - 2 ) ) ) . '@' . $domain );
+	}
 	skw_create_session( $account );
 	skw_audit( $account['id'], 'AUTHENTICATED', $account['email'] );
 	return array( 'user' => skw_public_user( $account ) );
 } );
 
 SKW_Router::add( 'POST', '#^/api/auth/login/verify$#', function () {
-	throw new SKW_Http_Error( 400, 'This code has expired. Sign in again to get a new code.' );
+	$body      = skw_body();
+	$token     = skw_require_string( isset( $body['challengeId'] ) ? $body['challengeId'] : null, 'Sign-in request', 200 );
+	$code      = preg_replace( '/\s+/', '', (string) ( isset( $body['code'] ) ? $body['code'] : '' ) );
+	$id        = hash( 'sha256', $token );
+	$challenge = SKW_DB::get_row( 'SELECT * FROM {login_challenges} WHERE id = ?', array( $id ) );
+	if ( ! $challenge || (int) $challenge['expires_at'] < time() ) {
+		SKW_DB::query( 'DELETE FROM {login_challenges} WHERE id = ?', array( $id ) );
+		throw new SKW_Http_Error( 400, 'This code has expired. Sign in again to get a new code.' );
+	}
+	SKW_DB::query( 'UPDATE {login_challenges} SET attempts = attempts + 1 WHERE id = ?', array( $id ) );
+	if ( (int) $challenge['attempts'] + 1 > 5 || ! skw_rate_limit( 'login-code:' . $challenge['user_id'], 15, 900 ) ) {
+		SKW_DB::query( 'DELETE FROM {login_challenges} WHERE user_id = ?', array( $challenge['user_id'] ) );
+		throw new SKW_Http_Error( 429, 'Too many wrong codes. Sign in again to get a new code.' );
+	}
+	if ( ! preg_match( '/^\d{6}$/', $code ) || ! password_verify( $code, $challenge['code_hash'] ) ) {
+		throw new SKW_Http_Error( 400, 'That code is not correct. Check the email and try again.' );
+	}
+	SKW_DB::query( 'DELETE FROM {login_challenges} WHERE id = ?', array( $id ) );
+	$account = skw_user_by_id( $challenge['user_id'] );
+	if ( ! $account ) {
+		throw new SKW_Http_Error( 400, 'This code has expired. Sign in again to get a new code.' );
+	}
+	if ( 'AGENCY' === $account['role'] && ! SKW_DB::get_var( "SELECT 1 FROM {agencies} WHERE id = ? AND status = 'ACTIVE' AND is_approved = 1", array( $account['agency_id'] ) ) ) {
+		throw new SKW_Http_Error( 403, 'This agency account is pending approval or suspended. Contact SAFAR KAABE support.' );
+	}
+	skw_create_session( $account );
+	skw_audit( $account['id'], 'AUTHENTICATED', $account['email'] . ' (with sign-in code)' );
+	return array( 'user' => skw_public_user( $account ) );
 } );
 
 SKW_Router::add( 'GET', '#^/api/auth/session$#', function () {
+	global $skw_mailer;
 	$user = skw_current_user();
-	return array( 'user' => $user ? skw_public_user( $user ) : null, 'loginCodesAvailable' => false );
+	return array( 'user' => $user ? skw_public_user( $user ) : null, 'loginCodesAvailable' => is_callable( $skw_mailer ) );
 } );
 
 SKW_Router::add( 'POST', '#^/api/auth/logout$#', function () {
@@ -239,8 +279,22 @@ SKW_Router::add( 'PATCH', '#^/api/auth/theme$#', function () {
 } );
 
 SKW_Router::add( 'PATCH', '#^/api/auth/login-code$#', function () {
-	skw_mutation();
-	throw new SKW_Http_Error( 503, 'Sign-in codes are not available on this website yet.' );
+	global $skw_mailer;
+	$user = skw_mutation();
+	$body = skw_body();
+	if ( ! isset( $body['enabled'] ) || ! is_bool( $body['enabled'] ) ) {
+		throw new SKW_Http_Error( 400, 'Choose whether to turn sign-in codes on or off.' );
+	}
+	$password = skw_require_string( isset( $body['password'] ) ? $body['password'] : null, 'Current password', 256 );
+	if ( ! password_verify( $password, $user['password_hash'] ) ) {
+		throw new SKW_Http_Error( 400, 'Your current password is not correct.' );
+	}
+	if ( $body['enabled'] && ! is_callable( $skw_mailer ) ) {
+		throw new SKW_Http_Error( 503, 'Sign-in codes need email sending to be set up on the server first.' );
+	}
+	SKW_DB::update( 'users', array( 'login_code_enabled' => $body['enabled'] ? 1 : 0 ), array( 'id' => $user['id'] ) );
+	skw_audit( $user['id'], $body['enabled'] ? 'LOGIN_CODES_ENABLED' : 'LOGIN_CODES_DISABLED', $user['email'] );
+	return array( 'user' => skw_public_user( array_merge( $user, array( 'login_code_enabled' => $body['enabled'] ? 1 : 0 ) ) ) );
 } );
 
 SKW_Router::add( 'POST', '#^/api/presence$#', function () {
