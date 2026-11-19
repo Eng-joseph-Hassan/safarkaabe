@@ -1,0 +1,8 @@
+{
+  "name": "anfac-media-store",
+  "displayName": "ANFAC MEDIA Shop",
+  "version": "1.0.0",
+  "description": "A product shop inside SAFAR KAABE. ANFAC MEDIA sells design, video, photo, printing, branding and web services. Travelers and agencies browse, order and track their orders.",
+  "entry": "index.js",
+  "client": "client.js"
+}

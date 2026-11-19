@@ -20,6 +20,29 @@ Super Admins can also start private conversations with an active agency or trave
 
 Local development stores accounts, sessions, agencies, catalog products, bookings, conversations, messages, and audit events in SQLite under `data/safar-kaabe.sqlite`. On Vercel, set `DATABASE_URL` to a Neon PostgreSQL connection string; the app initializes its PostgreSQL schema automatically. Never commit either database or its connection string.
 
+### Pay by phone and automatic refunds (marupay)
+
+Travelers can also pay straight from their phone with EVC Plus, Zaad or Sahal (through WaafiPay) or with eDahab. The app uses the [marupay](https://github.com/iamshabell/marupay) package (wrapped in `marupay-gateway.js`). The traveler books, the seat is held, and a payment request goes to their phone; they approve it with their PIN while the app shows "Check your phone". Each option only appears when its keys are set:
+
+| Variable | What it is |
+| --- | --- |
+| `WAAFI_API_USER_ID` | WaafiPay API user ID |
+| `WAAFI_API_KEY` | WaafiPay API key |
+| `WAAFI_MERCHANT_UID` | WaafiPay merchant UID (also used by the hosted checkout) |
+| `MARUPAY_WAAFI_BASE_URL` | Optional. Defaults to `https://api.waafipay.net/asm` |
+| `EDAHAB_API_KEY` | eDahab API key |
+| `EDAHAB_SECRET_KEY` | eDahab secret key (used to sign each request) |
+| `EDAHAB_AGENT_CODE` | eDahab agent code |
+| `EDAHAB_BASE_URL` | Optional. Defaults to `https://edahab.net/api` |
+| `PHONE_PAYMENT_TIMEOUT_MS` | Optional. How long to wait for the traveler to approve (default 45000) |
+
+- **Paid:** the booking becomes "Paid – needs confirmation" and the traveler and agency are told.
+- **Not paid** (no balance, number not registered, or declined): the booking is cancelled and the seats are freed straight away.
+- **No answer in time:** nothing is retried and the seats stay held. The agency is asked to check its WaafiPay or eDahab merchant portal, then taps "Payment received – confirm" or "Payment not received – cancel". The 2-hour unpaid-booking cleanup never touches these bookings.
+- A payment can only be charged once, even if the traveler taps twice.
+
+**Automatic refunds:** when a paid booking is cancelled, agency staff can tap "Send refund automatically" in the refund window. The money goes from the merchant account to the traveler's phone and the transaction number is saved as the refund reference. A refund can only be sent once. If the provider does not answer, the refund is marked "Check refund": look in the merchant portal, then record it by hand with its reference. Vercel functions are allowed 60 seconds so there is time for the traveler to approve.
+
 ### Password reset email
 
 Forgot-password codes are sent by SMTP. The sender address defaults to `engjoseph250@gmail.com`, but an address alone cannot send email. Configure these variables in the server's environment before starting it:

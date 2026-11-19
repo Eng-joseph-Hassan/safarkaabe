@@ -16,6 +16,7 @@ Object.assign(globalThis, {
 });
 const ticketLayoutVersion = 4;
 const { createDatabase } = require('./database');
+const phonePay = require('./marupay-gateway');
 
 const root = __dirname;
 const defaultDataDirectory = process.env.VERCEL
@@ -123,6 +124,21 @@ const schema = `
     transaction_id TEXT,
     updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS phone_payments (
+    id TEXT PRIMARY KEY,
+    booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL CHECK (provider IN ('WAAFI', 'EDAHAB')),
+    account_number TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'FAILED', 'UNKNOWN')),
+    transaction_id TEXT,
+    reference_id TEXT,
+    error_message TEXT,
+    started_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS catalog_products (
     id TEXT PRIMARY KEY,
@@ -602,12 +618,22 @@ async function refreshWaafiPayment(referenceId) {
 
 const runInTransaction = callback => db.transaction(callback);
 
+// Takes the booking row's write lock for the rest of the transaction. The phone-payment claim and every path
+// that cancels a booking waiting for payment call this first, so on Postgres (READ COMMITTED) they run one
+// after the other and each later statement sees what the other committed. SQLite already serializes writes.
+async function lockBookingRow(bookingId) {
+  await db.prepare('UPDATE bookings SET updated_at = updated_at WHERE id = ?').run(bookingId);
+}
+
 // Cancels a booking that is still waiting for online payment and returns its seats.
 // Must run inside a transaction. Returns true when seats were released.
 async function releasePendingPaymentBooking(bookingId, reason) {
+  await lockBookingRow(bookingId);
   const released = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?
     WHERE id = ? AND state = 'PAYMENT_PENDING'
       AND NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED')
+      AND NOT EXISTS (SELECT 1 FROM phone_payments WHERE booking_id = bookings.id
+        AND (status IN ('APPROVED', 'UNKNOWN') OR (status = 'PENDING' AND started_at IS NOT NULL)))
     RETURNING seat_count AS "seatCount", offer_id AS "offerId", agency_id AS "agencyId"`).get(reason, nowIso(), bookingId);
   if (!released) return false;
   if (released.offerId) {
@@ -631,6 +657,135 @@ async function notifyReleasedPaymentHold(booking, reason) {
     await createNotifications(items);
   } catch (error) {
     console.error('Released-hold notification could not be created:', error.message);
+  }
+}
+
+// ---------- Pay by phone (marupay): the customer approves on their phone with their PIN ----------
+const phonePaymentSelect = `SELECT p.id, p.booking_id AS "bookingId", p.provider, p.account_number AS "accountNumber",
+    p.amount_cents AS "amountCents", p.currency, p.status, p.transaction_id AS "transactionId", p.reference_id AS "referenceId",
+    p.error_message AS "errorMessage", p.started_at AS "startedAt", p.updated_at AS "updatedAt",
+    b.customer_id AS "customerId", b.agency_id AS "agencyId", b.reference AS "bookingReference",
+    b.offer_title AS "offerTitle", b.seat_count AS "seatCount", b.travel_date AS "travelDate", b.state AS "bookingState"
+  FROM phone_payments p JOIN bookings b ON b.id = p.booking_id`;
+
+const loadPhonePayment = bookingId => db.prepare(`${phonePaymentSelect} WHERE p.booking_id = ?`).get(bookingId);
+
+function publicPhonePayment(payment) {
+  if (!payment) return null;
+  return {
+    bookingId: payment.bookingId, provider: payment.provider, providerLabel: phonePay.providerLabel(payment.provider),
+    accountNumber: payment.accountNumber, amountCents: Number(payment.amountCents), currency: payment.currency,
+    status: payment.status === 'PENDING' && payment.startedAt ? 'PROCESSING' : payment.status,
+    transactionId: payment.transactionId || null, message: payment.errorMessage || null,
+    bookingState: payment.bookingState
+  };
+}
+
+async function notifyPhonePayment(payment, outcome, reason) {
+  const amount = `${(Number(payment.amountCents) / 100).toFixed(2)} ${payment.currency}`;
+  const href = `/?booking=${encodeURIComponent(payment.bookingId)}`;
+  const base = { agencyId: payment.agencyId, bookingId: payment.bookingId, href };
+  const wallet = phonePay.providerLabel(payment.provider);
+  const portal = phonePay.providerPortal(payment.provider);
+  const trip = `booking ${payment.bookingReference} (${payment.offerTitle})`;
+  const items = [];
+  const key = `PHONE_PAYMENT:${payment.id}:${outcome}`;
+  if (payment.customerId) {
+    const traveler = {
+      APPROVED: ['PAYMENT_CONFIRMED', 'Payment confirmed', `Your payment of ${amount} for ${trip} was received. The agency will finalize your trip.`],
+      FAILED: ['PAYMENT_FAILED', 'Payment not completed', `Your payment for ${trip} did not go through: ${reason} The booking was cancelled and no money was taken. You can book again.`],
+      UNKNOWN: ['PAYMENT_CHECK_NEEDED', 'Payment is being checked', `We could not confirm your payment of ${amount} for ${trip} yet. Please do not pay again. The agency will check and let you know.`],
+      PAID_AFTER_CANCELLATION: ['PAYMENT_NEEDS_REFUND', 'Payment received for a cancelled booking', `Your payment of ${amount} for ${trip} arrived after the booking was cancelled. The agency will refund you or help you rebook.`],
+      AGENCY_REJECTED: ['PAYMENT_FAILED', 'Payment not found', `The agency could not find your payment for ${trip}, so the booking was cancelled. If money was taken from your wallet, message the agency with the transaction details.`]
+    }[outcome];
+    if (traveler) items.push({ ...base, recipientUserId: payment.customerId, type: traveler[0], title: traveler[1], body: traveler[2], dedupeKey: `${key}:${payment.customerId}` });
+  }
+  const agency = {
+    APPROVED: ['PAYMENT_RECEIVED', 'Payment received', `${trip} was paid: ${amount} by phone (${wallet}, ${payment.accountNumber}). Review and accept the booking.`],
+    FAILED: ['PAYMENT_FAILED', 'Customer payment not completed', `The phone payment for ${trip} did not go through: ${reason} The booking was cancelled and its seats are free again.`],
+    UNKNOWN: ['PAYMENT_CHECK_NEEDED', 'Check a phone payment', `We could not confirm the phone payment of ${amount} for ${trip} from ${payment.accountNumber}. Check your ${portal} merchant portal, then tap "Payment received" or "Payment not received" on the booking.`],
+    AGENCY_REJECTED: ['PAYMENT_FAILED', 'Phone payment marked not received', `You marked the phone payment for ${trip} as not received. The booking was cancelled and its seats are free again. If the traveler later shows the money was taken, record a refund.`],
+    PAID_AFTER_CANCELLATION: ['PAYMENT_NEEDS_REFUND', 'Payment received for a cancelled booking', `${wallet} confirmed ${amount} from ${payment.accountNumber} for ${trip}, which was already cancelled. Contact the traveler to rebook or refund.`]
+  }[outcome];
+  if (agency) {
+    for (const staffId of await agencyStaffIds(payment.agencyId)) {
+      items.push({ ...base, recipientUserId: staffId, type: agency[0], title: agency[1], body: agency[2], dedupeKey: `${key}:${staffId}` });
+    }
+  }
+  try {
+    await createNotifications(items);
+  } catch (error) {
+    console.error('Phone payment notification could not be created:', error.message);
+  }
+}
+
+// Applies the provider's answer to a claimed phone payment. Returns the updated payment.
+async function settlePhonePayment(payment, result) {
+  const updatedAt = nowIso();
+  if (result.outcome === 'APPROVED') {
+    let paidAfterCancellation = false;
+    await runInTransaction(async () => {
+      await lockBookingRow(payment.bookingId);
+      await db.prepare(`UPDATE phone_payments SET status = 'APPROVED', transaction_id = ?, reference_id = ?, error_message = NULL, updated_at = ?
+        WHERE id = ? AND status IN ('PENDING', 'UNKNOWN')`).run(result.transactionId, result.referenceId, updatedAt, payment.id);
+      const paid = await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED', updated_at = ? WHERE id = ? AND state = 'PAYMENT_PENDING'")
+        .run(updatedAt, payment.bookingId);
+      if (paid.changes !== 1) {
+        paidAfterCancellation = true;
+        await db.prepare("UPDATE bookings SET refund_status = 'NEEDED', updated_at = ? WHERE id = ? AND refund_status IS NULL").run(updatedAt, payment.bookingId);
+      }
+    });
+    await audit(null, 'PHONE_PAYMENT_APPROVED', `${payment.bookingReference} ${payment.provider} ${result.transactionId || ''} (${payment.amountCents} cents)`);
+    if (paidAfterCancellation) await audit(null, 'PAYMENT_RECEIVED_FOR_CANCELLED_BOOKING', `${payment.bookingReference} (phone ${payment.id})`);
+    await notifyPhonePayment(payment, paidAfterCancellation ? 'PAID_AFTER_CANCELLATION' : 'APPROVED');
+  } else if (result.outcome === 'FAILED') {
+    let released = false;
+    await runInTransaction(async () => {
+      await lockBookingRow(payment.bookingId);
+      await db.prepare(`UPDATE phone_payments SET status = 'FAILED', error_message = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'UNKNOWN')`)
+        .run(result.reason, updatedAt, payment.id);
+      released = await releasePendingPaymentBooking(payment.bookingId, `Phone payment not completed: ${result.reason}`);
+    });
+    await audit(null, 'PHONE_PAYMENT_FAILED', `${payment.bookingReference} ${payment.provider}: ${result.errorCode || ''} ${result.reason}`);
+    if (released) publishCatalogChange('availability');
+    await notifyPhonePayment(payment, 'FAILED', result.reason);
+  } else {
+    const message = `${result.reason} Check the ${phonePay.providerPortal(payment.provider)} merchant portal before doing anything else.`;
+    await db.prepare(`UPDATE phone_payments SET status = 'UNKNOWN', error_message = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'`)
+      .run(message, updatedAt, payment.id);
+    await audit(null, 'PHONE_PAYMENT_UNKNOWN', `${payment.bookingReference} ${payment.provider}: ${result.errorCode || ''}`);
+    await notifyPhonePayment(payment, 'UNKNOWN');
+  }
+  return loadPhonePayment(payment.bookingId);
+}
+
+// A charge that started but never finished (for example the server was stopped mid-call) is treated as UNKNOWN,
+// so the agency checks it instead of the seats being held or released blindly.
+async function markStuckPhonePaymentsUnknown() {
+  const cutoff = new Date(Date.now() - phonePay.phonePaymentTimeoutMs() - 60_000).toISOString();
+  const stuck = await db.prepare(`${phonePaymentSelect} WHERE p.status = 'PENDING' AND p.started_at IS NOT NULL AND p.started_at < ?`).all(cutoff);
+  for (const payment of stuck) {
+    const changed = await db.prepare(`UPDATE phone_payments SET status = 'UNKNOWN', error_message = ?, updated_at = ?
+      WHERE id = ? AND status = 'PENDING' AND started_at IS NOT NULL`)
+      .run(`The payment check did not finish. Check the ${phonePay.providerPortal(payment.provider)} merchant portal before doing anything else.`, nowIso(), payment.id);
+    if (changed.changes !== 1) continue;
+    await audit(null, 'PHONE_PAYMENT_UNKNOWN', `${payment.bookingReference} ${payment.provider}: stopped before an answer`);
+    await notifyPhonePayment(payment, 'UNKNOWN');
+  }
+}
+
+async function notifyRefundSent(booking, amountCents, currency, refundReference, refundNote) {
+  if (!booking.customerId) return;
+  const amount = Number.isFinite(Number(amountCents)) ? `${(Number(amountCents) / 100).toFixed(2)} ${currency || 'USD'}` : 'your payment';
+  try {
+    await createNotifications([{
+      recipientUserId: booking.customerId, agencyId: booking.agencyId, bookingId: booking.id, type: 'PAYMENT_REFUNDED',
+      title: 'Your refund was sent',
+      body: `The agency sent back ${amount} for booking ${booking.ref} (${booking.offerTitle}). Refund reference: ${refundReference}.${refundNote ? ` Note: ${refundNote}` : ''}`,
+      href: `/?booking=${encodeURIComponent(booking.id)}`, dedupeKey: `PAYMENT_REFUNDED:${booking.id}`
+    }]);
+  } catch (error) {
+    console.error('Refund notification could not be created:', error.message);
   }
 }
 
@@ -720,18 +875,24 @@ async function runBackgroundSweeps() {
 }
 
 const pendingPaymentHoldMs = 2 * 60 * 60 * 1000;
+// How long after a phone charge starts before the agency may mark it "not received" (longer than any PIN prompt).
+const phoneRejectWaitMs = 15 * 60 * 1000;
 let lastPendingPaymentSweep = 0;
+const pendingPaymentSweepIntervalMs = process.env.NODE_ENV === 'test' ? 0 : 60_000;
 // Abandoned checkouts (the traveler never finishes paying) would otherwise hold seats forever.
 // Release holds older than two hours; runs at most once a minute.
 async function releaseStalePaymentHolds() {
-  if (Date.now() - lastPendingPaymentSweep < 60_000) return;
+  if (Date.now() - lastPendingPaymentSweep < pendingPaymentSweepIntervalMs) return;
   lastPendingPaymentSweep = Date.now();
+  await markStuckPhonePaymentsUnknown();
   const cutoff = new Date(Date.now() - pendingPaymentHoldMs).toISOString();
   const stale = await db.prepare(`SELECT bookings.id, bookings.reference, bookings.customer_id AS "customerId",
       bookings.agency_id AS "agencyId", bookings.offer_title AS "offerTitle", waafi_payments.reference_id AS "paymentReference"
     FROM bookings LEFT JOIN waafi_payments ON waafi_payments.booking_id = bookings.id
     WHERE bookings.state = 'PAYMENT_PENDING' AND bookings.created_at < ?
-      AND NOT EXISTS (SELECT 1 FROM waafi_payments approved WHERE approved.booking_id = bookings.id AND approved.status = 'APPROVED')`).all(cutoff);
+      AND NOT EXISTS (SELECT 1 FROM waafi_payments approved WHERE approved.booking_id = bookings.id AND approved.status = 'APPROVED')
+      AND NOT EXISTS (SELECT 1 FROM phone_payments phone WHERE phone.booking_id = bookings.id
+        AND (phone.status IN ('APPROVED', 'UNKNOWN') OR (phone.status = 'PENDING' AND phone.started_at IS NOT NULL)))`).all(cutoff);
   let released = 0;
   for (const booking of stale) {
     if (booking.paymentReference) {
@@ -968,7 +1129,12 @@ async function initializeDatabase() {
   await db.prepare("DELETE FROM catalog_products WHERE id IN ('off_flt_01', 'off_flt_02', 'off_car_01')").run();
 }
 
-const dbReady = initializeDatabase();
+// Plugins (plugins/*/index.js), e.g. the ANFAC MEDIA Shop. They add their own tables, API routes and page scripts.
+const plugins = require('./plugins/loader');
+const dbReady = initializeDatabase().then(() => plugins.initPlugins({
+  db, runInTransaction, nowIso, sendJson, readJson, requireRole, authorizeMutation, requireString, normalizeEmail,
+  validatePassword, hashPassword, createNotifications, audit, validateImageData, maxImageBytes: maxCatalogImageBytes
+}));
 
 const mimeType = filePath => mimeTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
 const secureCookie = process.env.NODE_ENV === 'production' ? '; Secure' : '';
@@ -2342,9 +2508,11 @@ async function handleApi(request, response, url) {
   const method = request.method || 'GET';
   const session = await getSession(request);
   const user = session?.user || null;
+  if (await plugins.handlePluginRequest(request, response, url, session)) return;
   if (method === 'GET' && pathname === '/api/payments/methods') {
     const config = getWaafiConfig();
-    sendJson(response, 200, { waafiEnabled: Boolean(config), waafiEnvironment: config ? (config.sandbox ? 'sandbox' : 'production') : null });
+    sendJson(response, 200, { waafiEnabled: Boolean(config), waafiEnvironment: config ? (config.sandbox ? 'sandbox' : 'production') : null,
+      ...phonePay.phonePaymentAvailability() });
     return;
   }
   if (method === 'GET' && ['/api/payments/waafi/success', '/api/payments/waafi/failure'].includes(pathname)) {
@@ -4657,6 +4825,67 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    // Pay by phone: asks the traveler's wallet provider to charge their number. The traveler approves with their PIN.
+    const phoneChargeMatch = pathname.match(/^\/api\/payments\/phone\/([0-9a-f-]+)\/charge$/i);
+    if (phoneChargeMatch && method === 'POST') {
+      if (!requireRole(response, user, ['CLIENT'])) return;
+      if (!authorizeMutation(request, response, session)) return;
+      const payment = await loadPhonePayment(phoneChargeMatch[1]);
+      if (!payment || payment.customerId !== user.id) {
+        sendJson(response, 404, { error: 'Payment not found.' });
+        return;
+      }
+      if (payment.status !== 'PENDING') {
+        sendJson(response, 200, { payment: publicPhonePayment(payment), alreadyFinished: true });
+        return;
+      }
+      if (payment.startedAt) {
+        sendJson(response, 409, { error: 'This payment is already in progress. Check your phone and enter your PIN.', payment: publicPhonePayment(payment) });
+        return;
+      }
+      if (payment.bookingState !== 'PAYMENT_PENDING') {
+        sendJson(response, 409, { error: 'This booking is no longer waiting for payment. Refresh your trips.', payment: publicPhonePayment(payment) });
+        return;
+      }
+      if (!phonePay.providerConfig(payment.provider)) {
+        sendJson(response, 503, { error: `${phonePay.providerLabel(payment.provider)} payments are not available right now. Message the agency or try again later.` });
+        return;
+      }
+      // Claim the payment first so two taps (or two devices) can never charge twice.
+      if (!await allowRateLimitRequest(`phone-charge-user:${user.id}`, 60 * 60 * 1000, 12) ||
+          !await allowRateLimitRequest(`phone-charge-number:${payment.accountNumber}`, 60 * 60 * 1000, 5)) {
+        sendJson(response, 429, { error: 'Too many payment requests were sent. Wait an hour and try again, or message the agency.' }, { 'Retry-After': '3600' });
+        return;
+      }
+      const startedAt = nowIso();
+      const claimed = await runInTransaction(async () => {
+        await lockBookingRow(payment.bookingId);
+        return db.prepare(`UPDATE phone_payments SET started_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'PENDING' AND started_at IS NULL
+            AND EXISTS (SELECT 1 FROM bookings WHERE bookings.id = phone_payments.booking_id AND bookings.state = 'PAYMENT_PENDING')`)
+          .run(startedAt, startedAt, payment.id);
+      });
+      if (claimed.changes !== 1) {
+        sendJson(response, 409, { error: 'This payment is already in progress. Check your phone and enter your PIN.', payment: publicPhonePayment(await loadPhonePayment(payment.bookingId)) });
+        return;
+      }
+      await audit(user.id, 'PHONE_PAYMENT_STARTED', `${payment.bookingReference} ${payment.provider} ${payment.accountNumber} (${payment.amountCents} cents)`);
+      let result;
+      try {
+        result = await phonePay.chargePhone({
+          provider: payment.provider, accountNumber: payment.accountNumber, amountCents: payment.amountCents,
+          currency: payment.currency, description: `SAFAR KAABE booking ${payment.bookingReference}`
+        });
+      } catch (error) {
+        // Thrown only before anything was sent to the provider, so it is safe to let the traveler try again.
+        await db.prepare("UPDATE phone_payments SET started_at = NULL, updated_at = ? WHERE id = ? AND status = 'PENDING'").run(nowIso(), payment.id);
+        throw error;
+      }
+      const settled = await settlePhonePayment(payment, result);
+      sendJson(response, 200, { payment: publicPhonePayment(settled) });
+      return;
+    }
+
     const bookingReviewMatch = pathname.match(/^\/api\/bookings\/([0-9a-f-]+)\/review$/i);
     if (bookingReviewMatch && ['PUT', 'DELETE'].includes(method)) {
       if (!requireRole(response, user, method === 'PUT' ? ['CLIENT'] : ['CLIENT', 'SUPER_ADMIN'])) return;
@@ -4765,8 +4994,23 @@ async function handleApi(request, response, url) {
         (SELECT currency FROM waafi_payments WHERE booking_id = bookings.id) AS paymentCurrency,
         (SELECT status FROM waafi_payments WHERE booking_id = bookings.id) AS paymentStatus,
         (SELECT transaction_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentTransactionId,
-        (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference
+        (SELECT reference_id FROM waafi_payments WHERE booking_id = bookings.id) AS paymentReference,
+        (SELECT status FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentStatus,
+        (SELECT provider FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentProvider,
+        (SELECT account_number FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentAccount,
+        (SELECT amount_cents FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentAmountCents,
+        (SELECT currency FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentCurrency,
+        (SELECT transaction_id FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentTransactionId,
+        (SELECT reference_id FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentReference,
+        (SELECT CASE WHEN status = 'APPROVED' AND reference_id IS NOT NULL THEN 1 ELSE 0 END FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentVerified,
+        (SELECT error_message FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentMessage,
+        (SELECT started_at FROM phone_payments WHERE booking_id = bookings.id) AS phonePaymentStartedAt
         FROM bookings WHERE id = ?`;
+      // A refund send that never finished (the server stopped mid-call) must be checked by hand, never resent blindly.
+      await db.prepare(`UPDATE bookings SET refund_status = 'UNCONFIRMED',
+          refund_note = 'The automatic refund did not finish. Check the merchant portal before sending again.'
+        WHERE id = ? AND refund_status = 'SENDING' AND updated_at < ?`)
+        .run(bookingId, new Date(Date.now() - phonePay.phonePaymentTimeoutMs() - 60_000).toISOString());
       const existing = await db.prepare(selectBooking).get(bookingId);
       if (!existing || (user.role === 'AGENCY' && existing.agencyId !== user.agency_id) ||
           (user.role === 'CLIENT' && existing.customerId !== user.id)) {
@@ -4946,39 +5190,166 @@ async function handleApi(request, response, url) {
           }
           await audit(user.id, 'BOOKING_REQUEST_RESTORED', `${existing.ref} (${existing.agencyId})`);
           if (existing.offerId) publishCatalogChange('availability');
-        } else if (body.action === 'MARK_REFUNDED') {
+        } else if (body.action === 'CONFIRM_PHONE_PAYMENT' || body.action === 'REJECT_PHONE_PAYMENT') {
+          if (existing.phonePaymentStatus !== 'UNKNOWN' || existing.state !== 'PAYMENT_PENDING') {
+            sendJson(response, 409, { error: 'This booking has no phone payment waiting to be checked.' });
+            return;
+          }
+          const payment = await loadPhonePayment(bookingId);
+          const confirm = body.action === 'CONFIRM_PHONE_PAYMENT';
+          // The PIN prompt can still be live on the traveler's phone after we stop waiting, so a payment can only be
+          // marked "not received" once any provider prompt has certainly expired.
+          const startedMs = Date.parse(payment.startedAt || payment.updatedAt || '');
+          const waitLeftMs = Number.isFinite(startedMs) ? startedMs + phoneRejectWaitMs - Date.now() : 0;
+          if (!confirm && waitLeftMs > 0) {
+            const minutes = Math.max(1, Math.ceil(waitLeftMs / 60_000));
+            sendJson(response, 409, { error: `The traveler may still be approving this payment. Check the merchant portal again in ${minutes} minute${minutes === 1 ? '' : 's'} before marking it as not received.`, retryAfterMinutes: minutes });
+            return;
+          }
+          const transactionId = typeof body.transactionId === 'string' && body.transactionId.trim()
+            ? body.transactionId.trim().slice(0, 80) : payment.transactionId || null;
+          const updatedAt = nowIso();
+          const resolved = await runInTransaction(async () => {
+            await lockBookingRow(bookingId);
+            const changed = await db.prepare(`UPDATE phone_payments SET status = ?, transaction_id = ?, reference_id = NULL, error_message = ?, updated_at = ?
+              WHERE booking_id = ? AND status = 'UNKNOWN'`)
+              .run(confirm ? 'APPROVED' : 'FAILED', transactionId, confirm ? null : 'The agency found no payment in the merchant portal.', updatedAt, bookingId);
+            if (changed.changes !== 1) return false;
+            if (confirm) {
+              const paid = await db.prepare("UPDATE bookings SET state = 'PAYMENT_RECEIVED', updated_at = ? WHERE id = ? AND state = 'PAYMENT_PENDING'")
+                .run(updatedAt, bookingId);
+              if (paid.changes !== 1) throw Object.assign(new Error('This booking has changed. Refresh the bookings list and try again.'), { statusCode: 409 });
+              return true;
+            }
+            if (!await releasePendingPaymentBooking(bookingId, 'The agency found no phone payment for this booking')) {
+              throw Object.assign(new Error('This booking has changed. Refresh the bookings list and try again.'), { statusCode: 409 });
+            }
+            return true;
+          });
+          if (!resolved) {
+            sendJson(response, 409, { error: 'This payment was already checked. Refresh the bookings list.' });
+            return;
+          }
+          await audit(user.id, confirm ? 'PHONE_PAYMENT_CONFIRMED_BY_AGENCY' : 'PHONE_PAYMENT_REJECTED_BY_AGENCY',
+            `${existing.ref} (${existing.agencyId}) ${payment.provider} ${transactionId || ''}`);
+          if (!confirm) publishCatalogChange('availability');
+          await notifyPhonePayment(payment, confirm ? 'APPROVED' : 'AGENCY_REJECTED');
+        } else if (body.action === 'SEND_REFUND') {
           if (existing.refundStatus !== 'NEEDED') {
-            sendJson(response, 409, { error: 'This booking has no refund waiting to be sent.' });
+            sendJson(response, 409, { error: existing.refundStatus === 'SENDING'
+              ? 'This refund is being sent right now. Refresh the bookings list in a minute.'
+              : 'This booking has no refund waiting to be sent.' });
+            return;
+          }
+          // Refunds are paid from the platform's merchant wallet, so they only go back to the number that paid,
+          // and only for a payment the provider itself confirmed. Anything else is sent by hand and recorded.
+          if (existing.phonePaymentStatus !== 'APPROVED' || !existing.phonePaymentReference) {
+            sendJson(response, 409, { error: existing.phonePaymentStatus === 'APPROVED'
+              ? 'This payment was confirmed by hand, not by the payment provider, so it cannot be refunded automatically. Send the refund yourself and record its reference.'
+              : 'Only a phone payment can be refunded automatically. Send the refund yourself and record its reference.' });
+            return;
+          }
+          const paidPhone = phonePay.normalizeSomaliPhone(existing.phonePaymentAccount || '');
+          const phoneSupplied = typeof body.phoneNumber === 'string' && body.phoneNumber.trim() !== '';
+          const requestedPhone = phoneSupplied ? phonePay.normalizeSomaliPhone(body.phoneNumber) : paidPhone;
+          const requestedProvider = typeof body.provider === 'string' && body.provider ? body.provider.toUpperCase() : existing.phonePaymentProvider;
+          if (!requestedPhone) {
+            sendJson(response, 400, { error: 'Enter the mobile money number to send the refund to, for example 61 234 5678.' });
+            return;
+          }
+          if (user.role !== 'SUPER_ADMIN' && (requestedPhone !== paidPhone || requestedProvider !== existing.phonePaymentProvider)) {
+            sendJson(response, 403, { error: `Automatic refunds can only go back to the number that paid (${paidPhone}). To refund a different number, send it yourself and record its reference, or ask SAFAR KAABE support.` });
+            return;
+          }
+          const rawProvider = requestedProvider || 'WAAFI';
+          const provider = ['WAAFI', 'EDAHAB'].includes(rawProvider) ? rawProvider : null;
+          if (!provider) {
+            sendJson(response, 400, { error: 'Choose EVC Plus, Zaad, Sahal or eDahab for the refund.' });
+            return;
+          }
+          if (!phonePay.providerConfig(provider)) {
+            sendJson(response, 503, { error: `Automatic refunds with ${phonePay.providerLabel(provider)} are not set up. Send the refund yourself and record its reference.` });
+            return;
+          }
+          const refundPhone = requestedPhone;
+          if (!refundPhone) {
+            sendJson(response, 400, { error: 'Enter the mobile money number to send the refund to, for example 61 234 5678.' });
+            return;
+          }
+          const financials = JSON.parse(existing.financials_json || '{}');
+          const amountCents = Number(existing.phonePaymentAmountCents ?? existing.paymentAmountCents ?? financials.customerGrandTotalCents);
+          const currency = existing.phonePaymentCurrency || existing.paymentCurrency || 'USD';
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+            sendJson(response, 409, { error: 'The refund amount could not be worked out. Send it yourself and record its reference.' });
+            return;
+          }
+          // Claim the refund first so it can never be sent twice.
+          const claimed = await db.prepare(`UPDATE bookings SET refund_status = 'SENDING', refund_note = NULL, updated_at = ?
+            WHERE id = ? AND agency_id = ? AND refund_status = 'NEEDED'`).run(nowIso(), bookingId, existing.agencyId);
+          if (claimed.changes !== 1) {
+            sendJson(response, 409, { error: 'This refund is already being sent or was recorded. Refresh the bookings list.' });
+            return;
+          }
+          const amountText = `${(amountCents / 100).toFixed(2)} ${currency}`;
+          await audit(user.id, 'BOOKING_REFUND_SEND_STARTED', `${existing.ref} (${existing.agencyId}): ${amountText} to ${refundPhone} via ${provider}`);
+          let result;
+          try {
+            result = await phonePay.creditPhone({ provider, accountNumber: refundPhone, amountCents, currency, description: `SAFAR KAABE refund ${existing.ref}` });
+          } catch (error) {
+            await db.prepare("UPDATE bookings SET refund_status = 'NEEDED', updated_at = ? WHERE id = ? AND refund_status = 'SENDING'").run(nowIso(), bookingId);
+            throw error;
+          }
+          const finishedAt = nowIso();
+          let refundMessage;
+          if (result.outcome === 'APPROVED') {
+            const refundReference = result.transactionId || result.referenceId || 'Sent automatically';
+            const refundNote = `Sent automatically to ${refundPhone} (${phonePay.providerLabel(provider)}).`;
+            await db.prepare(`UPDATE bookings SET refund_status = 'REFUNDED', refund_reference = ?, refund_note = ?, refunded_at = ?, updated_at = ?
+              WHERE id = ? AND refund_status = 'SENDING'`).run(refundReference, refundNote, finishedAt, finishedAt, bookingId);
+            await audit(user.id, 'BOOKING_REFUND_SENT', `${existing.ref} (${existing.agencyId}): ${amountText} to ${refundPhone} via ${provider}, ${refundReference}`);
+            await notifyRefundSent({ ...existing, id: bookingId }, amountCents, currency, refundReference, refundNote);
+            refundMessage = `Refund of ${amountText} sent to ${refundPhone}. Reference: ${refundReference}.`;
+          } else if (result.outcome === 'FAILED') {
+            const refundNote = `Automatic refund failed: ${result.reason}`;
+            await db.prepare(`UPDATE bookings SET refund_status = 'NEEDED', refund_note = ?, updated_at = ? WHERE id = ? AND refund_status = 'SENDING'`)
+              .run(refundNote, finishedAt, bookingId);
+            await audit(user.id, 'BOOKING_REFUND_SEND_FAILED', `${existing.ref} (${existing.agencyId}): ${result.errorCode || ''} ${result.reason}`);
+            refundMessage = `The refund was not sent: ${result.reason} No money left your account. You can try again or send it yourself.`;
+          } else {
+            const refundNote = `${result.reason} Check the ${phonePay.providerPortal(provider)} merchant portal to see if ${amountText} reached ${refundPhone}, then record the refund.`;
+            await db.prepare(`UPDATE bookings SET refund_status = 'UNCONFIRMED', refund_note = ?, updated_at = ? WHERE id = ? AND refund_status = 'SENDING'`)
+              .run(refundNote, finishedAt, bookingId);
+            await audit(user.id, 'BOOKING_REFUND_SEND_UNCONFIRMED', `${existing.ref} (${existing.agencyId}): ${result.errorCode || ''}`);
+            refundMessage = `We could not confirm the refund. ${refundNote} Do not send it again until you have checked.`;
+          }
+          const refundedBooking = await db.prepare(selectBooking).get(bookingId);
+          const { financials_json: refundedFinancials, ...refundedRest } = refundedBooking;
+          sendJson(response, 200, { booking: { ...refundedRest, financials: JSON.parse(refundedFinancials) },
+            refund: { outcome: result.outcome, message: refundMessage } });
+          return;
+        } else if (body.action === 'MARK_REFUNDED') {
+          if (!['NEEDED', 'UNCONFIRMED'].includes(existing.refundStatus)) {
+            sendJson(response, 409, { error: existing.refundStatus === 'SENDING'
+              ? 'This refund is being sent right now. Refresh the bookings list in a minute.'
+              : 'This booking has no refund waiting to be sent.' });
             return;
           }
           const refundReference = requireString(body.refundReference, 'Refund reference', 80);
           const refundNote = typeof body.refundNote === 'string' ? body.refundNote.trim().replace(/\s+/g, ' ').slice(0, 300) : '';
           const refundedAt = nowIso();
           const refunded = await db.prepare(`UPDATE bookings SET refund_status = 'REFUNDED', refund_reference = ?, refund_note = ?, refunded_at = ?, updated_at = ?
-            WHERE id = ? AND agency_id = ? AND refund_status = 'NEEDED'`)
+            WHERE id = ? AND agency_id = ? AND refund_status IN ('NEEDED', 'UNCONFIRMED')`)
             .run(refundReference, refundNote || null, refundedAt, refundedAt, bookingId, existing.agencyId);
           if (refunded.changes !== 1) {
             sendJson(response, 409, { error: 'This refund was already recorded. Refresh the bookings list.' });
             return;
           }
           await audit(user.id, 'BOOKING_REFUND_RECORDED', `${existing.ref} (${existing.agencyId}): ${refundReference}`);
-          if (existing.customerId) {
-            const financials = JSON.parse(existing.financials_json || '{}');
-            const amountCents = existing.paymentAmountCents ?? financials.customerGrandTotalCents;
-            const amount = Number.isFinite(Number(amountCents)) ? `${(Number(amountCents) / 100).toFixed(2)} ${existing.paymentCurrency || 'USD'}` : 'your payment';
-            try {
-              await createNotifications([{
-                recipientUserId: existing.customerId, agencyId: existing.agencyId, bookingId, type: 'PAYMENT_REFUNDED',
-                title: 'Your refund was sent',
-                body: `The agency sent back ${amount} for booking ${existing.ref} (${existing.offerTitle}). Refund reference: ${refundReference}.${refundNote ? ` Note: ${refundNote}` : ''}`,
-                href: `/?booking=${encodeURIComponent(bookingId)}`, dedupeKey: `PAYMENT_REFUNDED:${bookingId}`
-              }]);
-            } catch (error) {
-              console.error('Refund notification could not be created:', error.message);
-            }
-          }
+          const financials = JSON.parse(existing.financials_json || '{}');
+          await notifyRefundSent({ ...existing, id: bookingId }, existing.phonePaymentAmountCents ?? existing.paymentAmountCents ?? financials.customerGrandTotalCents,
+            existing.phonePaymentCurrency || existing.paymentCurrency || 'USD', refundReference, refundNote);
         } else {
-          sendJson(response, 400, { error: 'Choose accept, undo acceptance, edit, reject, restore, or record a refund for this booking.' });
+          sendJson(response, 400, { error: 'Choose accept, undo acceptance, edit, reject, restore, check a phone payment, or record a refund for this booking.' });
           return;
         }
 
@@ -4988,9 +5359,18 @@ async function handleApi(request, response, url) {
         return;
       }
 
+      const phonePaymentOpen = existing.phonePaymentStatus === 'UNKNOWN' ||
+        (existing.phonePaymentStatus === 'PENDING' && Boolean(existing.phonePaymentStartedAt));
+      if (existing.state === 'PAYMENT_PENDING' && phonePaymentOpen) {
+        sendJson(response, 409, { error: user.role === 'CLIENT'
+          ? 'Your phone payment is still being checked, so this booking cannot be deleted yet. Message the agency if you need help.'
+          : 'This phone payment has not been checked yet. Use "Payment received" or "Payment not received" first.' });
+        return;
+      }
+      const phonePaid = existing.phonePaymentStatus === 'APPROVED';
       const isNewUnpaidRequest = (existing.state === 'REQUESTED' && existing.paymentProvider === 'REQUEST_ONLY') ||
-        (existing.state === 'PAYMENT_PENDING' && existing.paymentStatus !== 'APPROVED');
-      const isAcceptedBooking = existing.state === 'ACCEPTED';
+        (existing.state === 'PAYMENT_PENDING' && existing.paymentStatus !== 'APPROVED' && !phonePaid);
+      const isAcceptedBooking = existing.state === 'ACCEPTED' || (existing.state === 'PAYMENT_RECEIVED' && phonePaid);
       if (user.role === 'CLIENT' && !isNewUnpaidRequest) {
         sendJson(response, 409, { error: 'Only a pending unpaid booking request can be deleted. Contact the agency to cancel an approved or paid trip.' });
         return;
@@ -5022,7 +5402,7 @@ async function handleApi(request, response, url) {
         sendJson(response, 400, { error: 'Choose whether the seats can return to inventory.' });
         return;
       }
-      const paymentReceived = existing.paymentStatus === 'APPROVED';
+      const paymentReceived = existing.paymentStatus === 'APPROVED' || phonePaid;
       const returnSeats = !paymentReceived || body.returnSeats === true;
       if (paymentReceived && body.returnSeats === undefined) {
         sendJson(response, 400, { error: 'Choose whether the paid seats are safe to return to inventory.' });
@@ -5037,12 +5417,15 @@ async function handleApi(request, response, url) {
         return;
       }
       const canceled = await runInTransaction(async () => {
+        await lockBookingRow(bookingId);
         const canceledBooking = await db.prepare(`UPDATE bookings SET state = 'CANCELLED', cancellation_reason = ?, updated_at = ?,
             refund_status = CASE WHEN ? = 1 THEN 'NEEDED' ELSE refund_status END
           WHERE id = ? AND agency_id = ? AND state = ? AND payment_provider = ?
             AND (? = 1 OR NOT EXISTS (SELECT 1 FROM waafi_payments WHERE booking_id = bookings.id AND status = 'APPROVED'))
+            AND (? = 1 OR NOT EXISTS (SELECT 1 FROM phone_payments WHERE booking_id = bookings.id
+              AND (status IN ('APPROVED', 'UNKNOWN') OR (status = 'PENDING' AND started_at IS NOT NULL))))
           RETURNING seat_count AS seatCount`)
-          .get(reason, nowIso(), paymentReceived ? 1 : 0, bookingId, existing.agencyId, existing.state, existing.paymentProvider, paymentReceived ? 1 : 0);
+          .get(reason, nowIso(), paymentReceived ? 1 : 0, bookingId, existing.agencyId, existing.state, existing.paymentProvider, paymentReceived ? 1 : 0, paymentReceived ? 1 : 0);
         if (!canceledBooking) return null;
         let available = null;
         if (returnSeats) {
@@ -5086,10 +5469,12 @@ async function handleApi(request, response, url) {
                b.category, b.traveler_name AS "travelerName", b.phone, b.seat_count AS "seatCount", b.state,
                b.payment_provider AS "paymentProvider", b.financials_json AS "financialsJson",
                b.refund_status AS "refundStatus", b.refund_reference AS "refundReference", a.name AS "agencyName",
-               w.status AS "paymentStatus", w.amount_cents AS "paidCents"
+               COALESCE(w.status, pp.status) AS "paymentStatus", COALESCE(w.amount_cents, pp.amount_cents) AS "paidCents",
+               pp.provider AS "phoneProvider"
         FROM bookings b
         JOIN agencies a ON a.id = b.agency_id
         LEFT JOIN waafi_payments w ON w.booking_id = b.id
+        LEFT JOIN phone_payments pp ON pp.booking_id = b.id
         WHERE b.created_at >= ? AND b.created_at < ? ${agencyFilter ? 'AND b.agency_id = ?' : ''}
         ORDER BY b.created_at DESC`).all(`${from}T00:00:00.000Z`, `${nextIsoDate(to)}T00:00:00.000Z`, ...(agencyFilter ? [agencyFilter] : []));
       const stateLabels = { REQUESTED: 'New request', PAYMENT_PENDING: 'Waiting for payment', PAYMENT_RECEIVED: 'Paid - needs confirmation',
@@ -5101,14 +5486,21 @@ async function handleApi(request, response, url) {
         const { financialsJson, ...rest } = row;
         return { ...rest, seatCount: Number(row.seatCount), totalCents, paidOnline: row.paymentStatus === 'APPROVED' };
       });
+      const refundLabels = { NEEDED: 'Refund needed', SENDING: 'Refund being sent', UNCONFIRMED: 'Refund to check', REFUNDED: 'Refunded' };
+      const paymentLabel = item => item.paymentProvider === 'WAAFI' ? `WaafiPay (${item.paymentStatus || 'not started'})`
+        : item.paymentProvider === 'PHONE' ? `Pay by phone - ${phonePay.providerLabel(item.phoneProvider)} (${item.paymentStatus || 'not started'})`
+        : 'Pay the agency directly';
+      bookings.forEach(item => {
+        if (!item.phoneProvider) delete item.phoneProvider;
+      });
       if (url.searchParams.get('format') === 'csv') {
         const header = ['Booking number', 'Booked on', 'Travel date', 'Trip', 'Type', 'Agency', 'Traveler', 'Phone', 'Seats', 'Status',
           'Payment', 'Total (USD)', 'Paid online (USD)', 'Refund', 'Refund reference'];
         const lines = [header, ...bookings.map(item => [item.reference, item.createdAt.slice(0, 10), item.travelDate || '', item.offerTitle, item.category,
           item.agencyName, item.travelerName, item.phone, item.seatCount, stateLabels[item.state] || item.state,
-          item.paymentProvider === 'WAAFI' ? `WaafiPay (${item.paymentStatus || 'not started'})` : 'Pay the agency directly',
+          paymentLabel(item),
           (item.totalCents / 100).toFixed(2), item.paidOnline ? (Number(item.paidCents) / 100).toFixed(2) : '0.00',
-          item.refundStatus === 'NEEDED' ? 'Refund needed' : item.refundStatus === 'REFUNDED' ? 'Refunded' : '', item.refundReference || ''])];
+          refundLabels[item.refundStatus] || '', item.refundReference || ''])];
         const csv = '﻿' + lines.map(line => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
         response.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
@@ -5138,7 +5530,7 @@ async function handleApi(request, response, url) {
       }
       sendJson(response, 200, {
         from, to, totals,
-        refundsNeeded: bookings.filter(item => item.refundStatus === 'NEEDED').length,
+        refundsNeeded: bookings.filter(item => ['NEEDED', 'UNCONFIRMED'].includes(item.refundStatus)).length,
         byTrip: [...byTrip.values()].sort((a, b) => b.salesCents - a.salesCents || b.requests - a.requests),
         byMonth: [...byMonth.values()].sort((a, b) => b.month.localeCompare(a.month))
       });
@@ -5159,6 +5551,10 @@ async function handleApi(request, response, url) {
           (SELECT status FROM waafi_payments WHERE booking_id = b.id) AS paymentStatus,
           (SELECT transaction_id FROM waafi_payments WHERE booking_id = b.id) AS paymentTransactionId,
           (SELECT reference_id FROM waafi_payments WHERE booking_id = b.id) AS paymentReference,
+          pp.status AS phonePaymentStatus, pp.provider AS phonePaymentProvider, pp.account_number AS phonePaymentAccount,
+          pp.amount_cents AS phonePaymentAmountCents, pp.transaction_id AS phonePaymentTransactionId,
+          pp.error_message AS phonePaymentMessage, pp.started_at AS phonePaymentStartedAt,
+          CASE WHEN pp.status = 'APPROVED' AND pp.reference_id IS NOT NULL THEN 1 ELSE 0 END AS phonePaymentVerified,
           a.name AS agencyName, a.logo_mime AS agencyLogoMime, a.logo_data AS agencyLogoData,
           (SELECT email FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyEmail,
           (SELECT phone FROM users WHERE users.agency_id = a.id AND users.role = 'AGENCY' ORDER BY users.created_at LIMIT 1) AS agencyPhone,
@@ -5177,6 +5573,7 @@ async function handleApi(request, response, url) {
         LEFT JOIN catalog_products c ON c.id = b.offer_id
         LEFT JOIN booking_documents d ON d.booking_id = b.id AND d.document_type = 'BOOKING_CONFIRMATION'
         LEFT JOIN agency_reviews r ON r.booking_id = b.id
+        LEFT JOIN phone_payments pp ON pp.booking_id = b.id
         ${bookingScope}
         ORDER BY b.created_at DESC
       `).all(...bookingScopeValue);
@@ -5247,9 +5644,32 @@ async function handleApi(request, response, url) {
         sendJson(response, 400, { error: 'Choose a valid travel date available for this listing.' });
         return;
       }
-      if (!['REQUEST_ONLY', 'WAAFI'].includes(paymentMethod)) {
+      if (!['REQUEST_ONLY', 'WAAFI', 'PHONE'].includes(paymentMethod)) {
         sendJson(response, 400, { error: 'Choose a valid booking request option.' });
         return;
+      }
+      let phoneWallet = null;
+      let phoneAccount = null;
+      if (paymentMethod === 'PHONE') {
+        const rawWallet = String(body.wallet || 'WAAFI').toUpperCase();
+        phoneWallet = ['EDAHAB'].includes(rawWallet) ? 'EDAHAB' : ['WAAFI', 'EVC', 'EVC_PLUS', 'ZAAD', 'SAHAL'].includes(rawWallet) ? 'WAAFI' : null;
+        if (!phoneWallet) {
+          sendJson(response, 400, { error: 'Choose EVC Plus, Zaad, Sahal or eDahab.' });
+          return;
+        }
+        if (user?.role !== 'CLIENT' || !phonePay.providerConfig(phoneWallet)) {
+          sendJson(response, 503, { error: `Paying with ${phonePay.providerLabel(phoneWallet)} is not available right now. Choose another option.` });
+          return;
+        }
+        phoneAccount = phonePay.normalizeSomaliPhone(body.paymentPhone ?? body.phone);
+        if (!phoneAccount) {
+          sendJson(response, 400, { error: 'Enter the mobile money number that will pay, for example 61 234 5678 or +252 61 234 5678.' });
+          return;
+        }
+        if (!await allowRateLimitRequest(`phone-booking:${user.id}`, 60 * 60 * 1000, 12)) {
+          sendJson(response, 429, { error: 'Too many pay-by-phone bookings were started. Wait an hour, or finish or cancel an earlier booking first.' }, { 'Retry-After': '3600' });
+          return;
+        }
       }
       if (paymentMethod === 'WAAFI' && (user?.role !== 'CLIENT' || !getWaafiConfig())) {
         sendJson(response, 503, { error: 'Online checkout is unavailable for this account. Choose a booking request or contact support.' });
@@ -5291,8 +5711,8 @@ async function handleApi(request, response, url) {
         phone,
         offerTitle: offer.title,
         category: offer.category,
-        paymentProvider: paymentMethod === 'WAAFI' ? 'WAAFI' : 'REQUEST_ONLY',
-        state: paymentMethod === 'WAAFI' ? 'PAYMENT_PENDING' : 'REQUESTED',
+        paymentProvider: paymentMethod === 'WAAFI' ? 'WAAFI' : paymentMethod === 'PHONE' ? 'PHONE' : 'REQUEST_ONLY',
+        state: ['WAAFI', 'PHONE'].includes(paymentMethod) ? 'PAYMENT_PENDING' : 'REQUESTED',
         seatCount,
         travelDate,
         financials
@@ -5396,6 +5816,11 @@ async function handleApi(request, response, url) {
             .run(crypto.randomUUID(), booking.id, paymentStart.referenceId, booking.financials.customerGrandTotalCents,
               paymentStart.hppUrl, paymentStart.orderId, createdAtUtc, createdAtUtc);
         }
+        if (phoneWallet) {
+          await db.prepare(`INSERT INTO phone_payments (id, booking_id, provider, account_number, amount_cents, currency, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'USD', 'PENDING', ?, ?)`)
+            .run(crypto.randomUUID(), booking.id, phoneWallet, phoneAccount, booking.financials.customerGrandTotalCents, createdAtUtc, createdAtUtc);
+        }
         const agencyRecipients = await db.prepare("SELECT id FROM users WHERE agency_id = ? AND role = 'AGENCY'").all(booking.agencyId);
         for (const recipient of agencyRecipients) {
           const notification = {
@@ -5427,12 +5852,15 @@ async function handleApi(request, response, url) {
         bookingDeliveries.push(deliverNativePush(notification.recipientUserId, notification).catch(error => console.warn('Android push notification failed:', error.message)));
       }
       await Promise.allSettled(bookingDeliveries);
-      await audit(user?.id || null, paymentStart ? 'WAAFI_CHECKOUT_STARTED' : 'BOOKING_REQUESTED', `${booking.reference} (${booking.agencyId})`);
+      await audit(user?.id || null, paymentStart ? 'WAAFI_CHECKOUT_STARTED' : phoneWallet ? 'PHONE_CHECKOUT_STARTED' : 'BOOKING_REQUESTED', `${booking.reference} (${booking.agencyId})`);
       if (user?.role === 'CLIENT') await db.prepare('DELETE FROM trip_waitlist WHERE offer_id = ? AND user_id = ?').run(offer.id, user.id);
       publishCatalogChange('availability');
       sendJson(response, 201, { booking: { ...booking, ref: booking.reference, createdAtUtc,
         paymentStatus: paymentStart ? 'PENDING' : null, paymentReference: paymentStart?.referenceId || null,
+        phonePaymentStatus: phoneWallet ? 'PENDING' : null, phonePaymentProvider: phoneWallet, phonePaymentAccount: phoneAccount,
         conversationId: bookingConversationId },
+        phonePayment: phoneWallet ? { provider: phoneWallet, providerLabel: phonePay.providerLabel(phoneWallet), accountNumber: phoneAccount,
+          amountCents: booking.financials.customerGrandTotalCents, currency: 'USD', status: 'PENDING' } : null,
         conversationId: bookingConversationId,
         paymentUrl: paymentStart?.hppUrl || null });
       return;

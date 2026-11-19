@@ -2019,6 +2019,18 @@
                     <input id="waafiPaymentRadio" type="radio" name="bookingPaymentMethod" value="WAAFI" disabled onchange="updateBookingPaymentNote()" class="mt-0.5 accent-fuchsia-400" />
                     <span><strong class="block text-slate-200">Pay now with WaafiPay mobile wallet</strong><span id="waafiPaymentAvailability">Secure checkout is not configured yet.</span></span>
                   </label>
+                  <label id="phonePaymentOption" class="hidden cursor-pointer items-start gap-2.5 rounded-lg border border-fuchsia-400/15 bg-gradient-to-r from-blue-500/[0.05] to-fuchsia-500/[0.05] p-2.5 text-[10px] text-slate-300">
+                    <input id="phonePaymentRadio" type="radio" name="bookingPaymentMethod" value="PHONE" onchange="updateBookingPaymentNote()" class="mt-0.5 accent-fuchsia-400" />
+                    <span><strong class="block text-slate-200">Pay now by phone</strong>A payment request goes to your phone. Enter your PIN to approve it.</span>
+                  </label>
+                  <div id="phonePaymentFields" class="hidden space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-2.5 text-[10px] text-slate-300">
+                    <label for="phonePaymentWallet" class="block font-bold text-slate-200">Your mobile money</label>
+                    <select id="phonePaymentWallet" onchange="updateBookingPaymentNote()" class="obsidian-input w-full rounded-xl px-3 py-2 text-base sm:text-xs">
+                      <option value="WAAFI">EVC Plus, Zaad or Sahal</option>
+                      <option value="EDAHAB">eDahab</option>
+                    </select>
+                    <p class="leading-relaxed text-slate-400">We send the payment request to the phone number above. Use the number of your mobile money account.</p>
+                  </div>
                   <p id="bookingPaymentNote" class="text-[10px] leading-relaxed text-slate-400">No payment is taken with a booking request. The agency will contact you to confirm availability and the final ticket price.</p>
                 </div>
               </div>
@@ -2825,11 +2837,31 @@
   </div>
   <div id="agencyRefundModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="agencyRefundTitle" onclick="if(event.target===this)closeAgencyRefund()">
     <form onsubmit="submitAgencyRefund(event)" class="glass-panel w-full max-w-md space-y-4 rounded-3xl border border-white/15 p-6 shadow-2xl">
-      <div><h3 id="agencyRefundTitle" class="font-extrabold text-white">Record refund</h3><p id="agencyRefundDescription" class="mt-1 text-[11px] text-slate-400"></p></div>
+      <div><h3 id="agencyRefundTitle" class="font-extrabold text-white">Refund the traveler</h3><p id="agencyRefundDescription" class="mt-1 text-[11px] text-slate-400"></p></div>
+      <p id="agencyRefundStatusNote" class="hidden rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100"></p>
+      <div id="agencyRefundAuto" class="hidden space-y-2 rounded-2xl border border-[#C909E6]/25 bg-[#C909E6]/[0.06] p-3">
+        <div class="text-[11px] font-bold text-white">Send the refund automatically</div>
+        <p class="text-[10px] text-slate-400">The money goes straight back to the number that paid. To refund a different number, send it yourself and save the reference below.</p>
+        <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <input id="agencyRefundPhone" type="tel" inputmode="tel" autocomplete="off" readonly placeholder="Mobile money number, e.g. 61 234 5678" aria-label="Mobile money number for the refund (the number that paid)" class="obsidian-input w-full rounded-xl px-3 py-2 text-base sm:text-xs" />
+          <select id="agencyRefundProvider" disabled aria-label="Mobile money service" class="obsidian-input rounded-xl px-2 py-2 text-base sm:text-xs"><option value="WAAFI">EVC Plus / Zaad / Sahal</option><option value="EDAHAB">eDahab</option></select>
+        </div>
+        <button id="agencyRefundAutoSend" type="button" onclick="sendAgencyRefundAutomatically()" class="w-full rounded-xl bg-[#C909E6] px-4 py-2.5 text-xs font-extrabold text-white"><i class="fa-solid fa-paper-plane mr-2" aria-hidden="true"></i>Send refund automatically</button>
+      </div>
+      <div id="agencyRefundManualHeading" class="hidden text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">Or record a refund you sent yourself</div>
       <label class="block"><span class="mb-1 block text-[11px] font-bold text-slate-300">Refund reference</span><span class="mb-1 block text-[10px] text-slate-500">The transaction number from EVC Plus, Zaad, Sahal, WaafiPay or your bank.</span><input id="agencyRefundReference" maxlength="80" required class="obsidian-input w-full rounded-xl px-3 py-2 text-xs" /></label>
       <label class="block"><span class="mb-1 block text-[11px] font-bold text-slate-300">Note for the traveler (optional)</span><textarea id="agencyRefundNote" maxlength="300" rows="3" class="obsidian-input w-full rounded-xl px-3 py-2 text-xs"></textarea></label>
       <div class="flex justify-end gap-2"><button type="button" onclick="closeAgencyRefund()" class="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300">Cancel</button><button id="agencyRefundSave" type="submit" class="rounded-xl bg-[#C909E6] px-5 py-2.5 text-xs font-extrabold text-white">Save refund</button></div>
     </form>
+  </div>
+  <div id="phonePayModal" class="fixed inset-0 z-[80] hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="phonePayTitle" aria-live="polite">
+    <section class="glass-panel w-full max-w-sm space-y-3 rounded-3xl border border-white/15 p-6 text-center shadow-2xl">
+      <div id="phonePayIcon" class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#C909E6]/15 text-2xl text-[#E27BF5]"><i class="fa-solid fa-mobile-screen-button" aria-hidden="true"></i></div>
+      <h3 id="phonePayTitle" class="text-lg font-extrabold text-white">Check your phone</h3>
+      <p id="phonePayMessage" class="text-sm font-semibold text-slate-200"></p>
+      <p id="phonePayHint" class="text-[11px] leading-relaxed text-slate-400"></p>
+      <button id="phonePayClose" type="button" onclick="closePhonePay()" class="hidden w-full rounded-xl bg-[#C909E6] px-4 py-2.5 text-xs font-extrabold text-white">OK</button>
+    </section>
   </div>
   <div id="savedOffersModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="savedOffersTitle" onclick="if(event.target===this)closeSavedOffersModal()">
     <section class="glass-panel max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-3xl border border-white/15 p-6 shadow-2xl">
@@ -2871,7 +2903,10 @@
         <button id="agencyBookingApproveAction" type="button" onclick="approveActiveAgencyBooking()" class="w-full rounded-xl bg-[#C909E6]/10 px-4 py-3 text-left text-xs font-bold text-[#E27BF5]"><i class="fa-solid fa-check mr-2"></i>Approve request</button>
         <button id="agencyBookingUndoAcceptanceAction" type="button" onclick="undoActiveAgencyBookingAcceptance()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-rotate-left mr-2"></i>Undo acceptance</button>
         <button id="agencyBookingCancelAction" type="button" onclick="cancelActiveAgencyBooking()" class="w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-regular fa-trash-can mr-2"></i><span id="agencyBookingCancelActionLabel">Delete request</span></button>
-        <button id="agencyBookingRefundAction" type="button" onclick="openAgencyRefund()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Record refund sent to traveler</button>
+        <p id="agencyBookingPhoneCheckNote" class="hidden rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
+        <button id="agencyBookingPhonePaidAction" type="button" onclick="resolveActivePhonePayment(true)" class="hidden w-full rounded-xl bg-[#C909E6]/10 px-4 py-3 text-left text-xs font-bold text-[#E27BF5]"><i class="fa-solid fa-circle-check mr-2"></i>Payment received – confirm</button>
+        <button id="agencyBookingPhoneUnpaidAction" type="button" onclick="resolveActivePhonePayment(false)" class="hidden w-full rounded-xl bg-rose-500/10 px-4 py-3 text-left text-xs font-bold text-rose-300"><i class="fa-solid fa-circle-xmark mr-2"></i>Payment not received – cancel</button>
+        <button id="agencyBookingRefundAction" type="button" onclick="openAgencyRefund()" class="hidden w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-left text-xs font-bold text-amber-200"><i class="fa-solid fa-money-bill-transfer mr-2"></i><span id="agencyBookingRefundActionLabel">Record refund sent to traveler</span></button>
         <p id="agencyBookingRetentionNote" class="hidden rounded-xl border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] leading-relaxed text-slate-400">The canceled request stays in booking history. Seats return to inventory when the ticket has not been issued.</p>
         <p id="agencyBookingCancelNote" class="hidden rounded-xl border border-amber-400/15 bg-amber-500/[.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100"></p>
       </div>
@@ -3040,6 +3075,7 @@
     let typingLastSentAt = 0;
     let myPresenceStatus = 'AVAILABLE';
     let waafiCheckoutEnabled = false;
+    let phonePaymentMethods = { phoneWaafi: false, phoneEdahab: false, autoRefunds: false };
     let voiceRecorder = null;
     let voiceStream = null;
     let voiceChunks = [];
@@ -4940,8 +4976,10 @@
 
     // ---------- Refunds ----------
     function refundBadge(booking, travelerView = false) {
-      if (booking?.refundStatus === 'NEEDED') {
-        return `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold bg-amber-500/15 text-amber-200">${travelerView ? 'Refund on the way' : 'Refund needed'}</span>`;
+      if (['NEEDED', 'SENDING', 'UNCONFIRMED'].includes(booking?.refundStatus)) {
+        const label = travelerView ? 'Refund on the way'
+          : booking.refundStatus === 'SENDING' ? 'Refund being sent' : booking.refundStatus === 'UNCONFIRMED' ? 'Check refund' : 'Refund needed';
+        return `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold bg-amber-500/15 text-amber-200">${label}</span>`;
       }
       if (booking?.refundStatus === 'REFUNDED') {
         return `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold bg-[#C909E6]/15 text-[#E27BF5]" title="${escapeHtml(booking.refundReference ? `Refund reference: ${booking.refundReference}` : '')}">Refunded${booking.refundReference ? ` · ${escapeHtml(booking.refundReference)}` : ''}</span>`;
@@ -4949,19 +4987,228 @@
       return '';
     }
 
-    function openAgencyRefund() {
+    // ---------- Pay by phone ----------
+    function bookingPaymentReceived(booking) {
+      return booking?.paymentStatus === 'APPROVED' || booking?.phonePaymentStatus === 'APPROVED';
+    }
+
+    function phoneWalletLabel(provider) {
+      return provider === 'EDAHAB' ? 'eDahab' : 'EVC Plus, Zaad or Sahal';
+    }
+
+    function phonePaymentState(booking) {
+      if (booking?.paymentProvider !== 'PHONE' || !booking.phonePaymentStatus) return null;
+      if (booking.phonePaymentStatus === 'PENDING' && booking.phonePaymentStartedAt) return 'PROCESSING';
+      if (booking.phonePaymentStatus === 'PENDING' && booking.state !== 'PAYMENT_PENDING') return 'NOT_CHARGED';
+      return booking.phonePaymentStatus;
+    }
+
+    function usdText(cents) {
+      return `$${(Number(cents) / 100).toFixed(2)}`;
+    }
+
+    function phonePaymentBadge(booking) {
+      const state = phonePaymentState(booking);
+      if (!state) return '';
+      const [label, style] = {
+        APPROVED: ['Paid by phone', 'bg-[#C909E6]/15 text-[#E27BF5]'],
+        FAILED: ['Phone payment failed', 'bg-rose-500/15 text-rose-300'],
+        UNKNOWN: ['Check phone payment', 'bg-amber-500/15 text-amber-200'],
+        PROCESSING: ['Phone payment in progress', 'bg-amber-500/15 text-amber-200'],
+        PENDING: ['Not paid yet', 'bg-blue-500/10 text-blue-200']
+      }[state] || ['', ''];
+      return label ? `<span class="ml-1 inline-block rounded px-2 py-1 text-[10px] font-bold ${style}">${label}</span>` : '';
+    }
+
+    function travelerPhonePaymentMarkup(booking) {
+      const state = phonePaymentState(booking);
+      if (!state) return '';
+      const amount = usdText(booking.phonePaymentAmountCents ?? booking.financials?.customerGrandTotalCents);
+      const number = escapeHtml(booking.phonePaymentAccount || '');
+      const text = {
+        APPROVED: `Paid ${amount} by phone (${escapeHtml(phoneWalletLabel(booking.phonePaymentProvider))}, ${number}).${booking.phonePaymentTransactionId ? ` Transaction: ${escapeHtml(booking.phonePaymentTransactionId)}` : ''}`,
+        FAILED: `Phone payment not completed. ${escapeHtml(booking.phonePaymentMessage || '')} No money was taken.`,
+        UNKNOWN: 'We are checking your phone payment. Please do not pay again. The agency will let you know.',
+        PROCESSING: 'Your phone payment is in progress. Check your phone and enter your PIN.',
+        PENDING: `Not paid yet. Tap "Pay now" to get the payment request on ${number}.`,
+        NOT_CHARGED: 'This booking was closed before any payment was requested. No money was taken.'
+      }[state];
+      const canPay = state === 'PENDING' && booking.state === 'PAYMENT_PENDING';
+      return `<div class="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 px-4 py-3 text-[11px] text-slate-300"><span><i class="fa-solid fa-mobile-screen-button mr-1 text-[#E27BF5]" aria-hidden="true"></i>${text}</span>${canPay ? `<button type="button" onclick="payBookingByPhone('${escapeHtml(booking.id)}')" class="rounded-xl bg-[#C909E6] px-3 py-2 font-extrabold text-white">Pay ${amount} now</button>` : ''}</div>`;
+    }
+
+    function showPhonePay(state, title, message, hint = '') {
+      const icons = { waiting: 'fa-solid fa-mobile-screen-button fa-beat-fade', ok: 'fa-solid fa-circle-check', fail: 'fa-solid fa-circle-xmark', unknown: 'fa-solid fa-hourglass-half' };
+      const colors = { waiting: 'bg-[#C909E6]/15 text-[#E27BF5]', ok: 'bg-[#C909E6]/15 text-[#E27BF5]', fail: 'bg-rose-500/15 text-rose-300', unknown: 'bg-amber-500/15 text-amber-200' };
+      const icon = document.getElementById('phonePayIcon');
+      icon.className = `mx-auto grid h-14 w-14 place-items-center rounded-full text-2xl ${colors[state]}`;
+      icon.innerHTML = `<i class="${icons[state]}" aria-hidden="true"></i>`;
+      document.getElementById('phonePayTitle').textContent = title;
+      document.getElementById('phonePayMessage').textContent = message;
+      document.getElementById('phonePayHint').textContent = hint;
+      document.getElementById('phonePayClose').classList.toggle('hidden', state === 'waiting');
+      const modal = document.getElementById('phonePayModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      if (state !== 'waiting') window.setTimeout(() => document.getElementById('phonePayClose').focus(), 50);
+    }
+
+    function closePhonePay() {
+      const modal = document.getElementById('phonePayModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function payBookingByPhone(bookingId) {
+      const booking = BOOKINGS.find(item => item.id === bookingId);
+      if (booking) runPhonePayment(booking);
+    }
+
+    async function runPhonePayment(booking) {
+      const amount = usdText(booking.phonePayment?.amountCents ?? booking.phonePaymentAmountCents ?? booking.financials?.customerGrandTotalCents);
+      const number = booking.phonePayment?.accountNumber || booking.phonePaymentAccount || booking.phone;
+      const wallet = phoneWalletLabel(booking.phonePayment?.provider || booking.phonePaymentProvider);
+      showPhonePay('waiting', 'Check your phone', `Check your phone and enter your PIN to approve ${amount}.`,
+        `We sent the request to ${number} (${wallet}). Keep this page open. It can take up to a minute.`);
+      let payment = null;
+      let problem = null;
+      let httpStatus = 200;
+      try {
+        ({ payment } = await apiRequest(`/api/payments/phone/${encodeURIComponent(booking.id)}/charge`, { method: 'POST' }));
+      } catch (error) {
+        payment = error.payload?.payment || null;
+        // Show the server's own words, never the request path added for developers.
+        problem = error.payload?.error || null;
+        httpStatus = Number(error.status) || 0;
+      }
+      const state = payment?.status;
+      // No answer at all, or a server error other than "not available": the charge may already be on its way.
+      const outcomeUnclear = !payment && (httpStatus === 0 || (httpStatus >= 500 && httpStatus !== 503) || httpStatus === 200);
+      const bookingClosed = payment && payment.bookingState && payment.bookingState !== 'PAYMENT_PENDING';
+      if (state === 'APPROVED') {
+        showPhonePay('ok', 'Payment received', `We received ${amount}. Thank you!`, `Booking ${booking.ref}: the agency will confirm your trip soon.`);
+      } else if (state === 'FAILED') {
+        showPhonePay('fail', 'Payment not completed', payment.message || 'The payment was not approved.', 'No money was taken. The booking was cancelled, so you can book again.');
+      } else if (state === 'UNKNOWN') {
+        showPhonePay('unknown', 'We are checking your payment', 'We could not confirm your payment yet. Please do not pay again.', 'Your seats stay reserved. The agency will check and let you know.');
+      } else if (state === 'PROCESSING') {
+        showPhonePay('unknown', 'Payment in progress', 'Check your phone and enter your PIN.', 'You will see the result in My Trips.');
+      } else if (bookingClosed) {
+        showPhonePay('fail', 'Booking no longer open', 'This booking was cancelled before the payment was requested. No money was taken.', 'You can book the trip again from the offers page.');
+      } else if (outcomeUnclear) {
+        showPhonePay('unknown', 'We could not confirm your payment yet', 'Please do not pay again.', 'Check My Trips in a minute. If money was taken, the agency will see it and confirm your booking.');
+      } else {
+        showPhonePay('fail', 'Payment not started', problem || 'The payment could not be started.', 'No money was taken. Your seats are held for a short time. You can try again from My Trips.');
+      }
+      try {
+        BOOKINGS = (await apiRequest('/api/bookings')).bookings;
+        if (currentUser?.role === 'CLIENT') renderCustomerPortal();
+        updateBookingBadges();
+        if (state === 'FAILED') refreshCustomerOffers().catch(error => console.warn('Unable to refresh trip availability.', error));
+      } catch (error) {
+        console.warn('Bookings could not be refreshed after the phone payment.', error);
+      }
+    }
+
+    async function resolveActivePhonePayment(paid) {
+      const booking = getActiveAgencyBooking();
+      if (!booking || booking.phonePaymentStatus !== 'UNKNOWN') return;
+      const amount = usdText(booking.phonePaymentAmountCents ?? booking.financials?.customerGrandTotalCents);
+      let transactionId = '';
+      if (paid) {
+        const answer = window.prompt(`Did ${amount} from ${booking.phonePaymentAccount} reach your merchant account?\n\nType the transaction number from the merchant portal (optional), then press OK to confirm the payment.`, '');
+        if (answer === null) return;
+        transactionId = answer.trim();
+      } else if (!confirm(`Cancel booking ${booking.ref}? Only do this if ${amount} from ${booking.phonePaymentAccount} is NOT in your merchant portal. This is only allowed 15 minutes after the payment started, because the traveler may still be approving it. The seats will be freed and the traveler told.`)) {
+        return;
+      }
+      closeAgencyBookingActions();
+      try {
+        const { booking: updated } = await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}`, {
+          method: 'PATCH',
+          body: { action: paid ? 'CONFIRM_PHONE_PAYMENT' : 'REJECT_PHONE_PAYMENT', ...(transactionId ? { transactionId } : {}) }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updated.id ? { ...item, ...updated } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        updateBookingBadges();
+        showToast(paid ? 'Payment confirmed. You can now approve the booking.' : 'Booking cancelled and its seats are free again. The traveler has been told.');
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    function refundAmountCents(booking) {
+      return booking?.phonePaymentAmountCents ?? booking?.paymentAmountCents ?? booking?.financials?.customerGrandTotalCents;
+    }
+
+    async function sendAgencyRefundAutomatically() {
       const booking = getActiveAgencyBooking();
       if (!booking || booking.refundStatus !== 'NEEDED') return;
+      const refundBookingId = booking.id;
+      const phoneNumber = document.getElementById('agencyRefundPhone').value.trim();
+      const provider = document.getElementById('agencyRefundProvider').value;
+      if (!phoneNumber) {
+        showToast('Enter the mobile money number to send the refund to.');
+        return;
+      }
+      const amount = usdText(refundAmountCents(booking));
+      if (!confirm(`Send ${amount} to ${phoneNumber} (${phoneWalletLabel(provider)}) now?\n\nThe money leaves your merchant account right away.`)) return;
+      const button = document.getElementById('agencyRefundAutoSend');
+      const label = button.innerHTML;
+      button.disabled = true;
+      button.textContent = 'Sending… please wait';
+      try {
+        const { booking: updated, refund } = await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}`, {
+          method: 'PATCH',
+          body: { action: 'SEND_REFUND', phoneNumber, provider }
+        });
+        BOOKINGS = BOOKINGS.map(item => item.id === updated.id ? { ...item, ...updated } : item);
+        renderAgencyPortal();
+        renderAdminPortal();
+        const stillOnThisBooking = activeAgencyBookingId === refundBookingId;
+        if (refund?.outcome === 'APPROVED') {
+          if (stillOnThisBooking) closeAgencyRefund();
+          showToast(stillOnThisBooking ? refund.message : `Booking ${booking.ref}: ${refund.message}`);
+        } else {
+          if (stillOnThisBooking) openAgencyRefund();
+          showToast(`${stillOnThisBooking ? '' : `Booking ${booking.ref}: `}${refund?.message || 'The refund was not sent.'}`);
+        }
+      } catch (error) {
+        showToast(activeAgencyBookingId === refundBookingId ? error.message : `Booking ${booking.ref}: ${error.message}`);
+      } finally {
+        button.disabled = false;
+        button.innerHTML = label;
+      }
+    }
+
+    function openAgencyRefund() {
+      const booking = getActiveAgencyBooking();
+      if (!booking || !['NEEDED', 'UNCONFIRMED'].includes(booking.refundStatus)) return;
       closeAgencyBookingActions();
-      const amountCents = booking.paymentAmountCents ?? booking.financials?.customerGrandTotalCents;
+      const amountCents = refundAmountCents(booking);
+      const autoAvailable = phonePaymentMethods.autoRefunds && booking.refundStatus === 'NEEDED' &&
+        booking.phonePaymentStatus === 'APPROVED' && Number(booking.phonePaymentVerified) === 1 && Boolean(booking.phonePaymentAccount) &&
+        (booking.phonePaymentProvider === 'EDAHAB' ? phonePaymentMethods.phoneEdahab : phonePaymentMethods.phoneWaafi);
       document.getElementById('agencyRefundDescription').textContent =
-        `Booking ${booking.ref} · ${booking.travelerName}${Number.isFinite(Number(amountCents)) ? ` · ${formatMoney(Number(amountCents))}` : ''}. Send the money back first, then save the reference here. The traveler will be told.`;
+        `Booking ${booking.ref} · ${booking.travelerName}${Number.isFinite(Number(amountCents)) ? ` · ${formatMoney(Number(amountCents))}` : ''}. ${autoAvailable ? 'Send the money automatically, or send it yourself and save the reference below.' : 'Send the money back first, then save the reference here.'} The traveler will be told.`;
+      const statusNote = document.getElementById('agencyRefundStatusNote');
+      statusNote.textContent = booking.refundStatus === 'UNCONFIRMED'
+        ? `${booking.refundNote || 'We could not confirm the automatic refund.'} Do not send it again until you have checked.`
+        : booking.refundNote || '';
+      statusNote.classList.toggle('hidden', !statusNote.textContent);
+      document.getElementById('agencyRefundAuto').classList.toggle('hidden', !autoAvailable);
+      document.getElementById('agencyRefundManualHeading').classList.toggle('hidden', !autoAvailable);
+      if (autoAvailable) {
+        document.getElementById('agencyRefundPhone').value = booking.phonePaymentAccount;
+        document.getElementById('agencyRefundProvider').value = booking.phonePaymentProvider === 'EDAHAB' ? 'EDAHAB' : 'WAAFI';
+      }
       document.getElementById('agencyRefundReference').value = '';
       document.getElementById('agencyRefundNote').value = '';
       const modal = document.getElementById('agencyRefundModal');
       modal.classList.remove('hidden');
       modal.classList.add('flex');
-      window.setTimeout(() => document.getElementById('agencyRefundReference').focus(), 50);
+      if (!autoAvailable) window.setTimeout(() => document.getElementById('agencyRefundReference').focus(), 50);
     }
 
     function closeAgencyRefund() {
@@ -7604,6 +7851,7 @@
             phone: travelerPhone,
             seatCount,
             paymentMethod,
+            ...(paymentMethod === 'PHONE' ? { wallet: document.getElementById('phonePaymentWallet').value, paymentPhone: travelerPhone } : {}),
             travelDate: selectedOffer.travelDate || document.getElementById('searchDate').value
           }
         });
@@ -7619,6 +7867,10 @@
         if (currentUser?.role === 'SUPER_ADMIN') renderAdminPortal();
         updateBookingBadges();
         clearBookingRequestEntry();
+        if (booking.paymentProvider === 'PHONE') {
+          await runPhonePayment(booking);
+          return;
+        }
         if (paymentUrl) {
           window.location.assign(paymentUrl);
           return;
@@ -7670,12 +7922,13 @@
       const title = currentLocale === 'so' && selectedOffer.titleSo ? selectedOffer.titleSo : selectedOffer.titleEn;
 
       const selectedPaymentMethod = document.querySelector('input[name="bookingPaymentMethod"]:checked')?.value || 'REQUEST_ONLY';
-      document.getElementById('currentStagePill').innerText = selectedPaymentMethod === 'WAAFI' ? 'Step 2: Pay online' : 'Step 2: Send request';
+      const paysOnline = ['WAAFI', 'PHONE'].includes(selectedPaymentMethod);
+      document.getElementById('currentStagePill').innerText = selectedPaymentMethod === 'PHONE' ? 'Step 2: Pay by phone' : selectedPaymentMethod === 'WAAFI' ? 'Step 2: Pay online' : 'Step 2: Send request';
 
       document.getElementById('selectedOfferBox').innerHTML = `
         <div class="flex justify-between font-mono-code text-[11px] text-blue-400">
           <span>${escapeHtml(selectedOffer.category)} • ${escapeHtml(selectedOffer.supplierRef)}</span>
-          <span class="${selectedPaymentMethod === 'WAAFI' ? 'bg-gradient-to-r from-blue-500/25 to-fuchsia-500/25 text-fuchsia-200' : 'bg-blue-500/20 text-blue-300'} px-1.5 py-0.5 rounded font-bold">${selectedPaymentMethod === 'WAAFI' ? 'WAAFI' : 'REQUEST'}</span>
+          <span class="${paysOnline ? 'bg-gradient-to-r from-blue-500/25 to-fuchsia-500/25 text-fuchsia-200' : 'bg-blue-500/20 text-blue-300'} px-1.5 py-0.5 rounded font-bold">${selectedPaymentMethod === 'PHONE' ? 'PHONE' : selectedPaymentMethod === 'WAAFI' ? 'WAAFI' : 'REQUEST'}</span>
         </div>
         <div class="font-bold text-white text-xs sm:text-sm">${escapeHtml(title)}</div>
         <div class="text-slate-400">Agency: ${agency ? escapeHtml(agency.name) : 'Direct'}</div>
@@ -7692,11 +7945,11 @@
         <div class="flex justify-between border-t border-white/10 pt-2 text-sm font-extrabold text-white">
           <span>Estimated total:</span><span class="font-mono-code text-blue-400">${formatMoney(fin.customerGrandTotalCents)}</span>
         </div>
-        <p class="text-[10px] leading-relaxed text-slate-500">${selectedPaymentMethod === 'WAAFI' ? 'You authorize WaafiPay to charge this displayed estimate now. The agency still confirms ticket availability and issuance.' : 'Estimate only. The agency confirms the final price and payment directly with you.'}</p>
+        <p class="text-[10px] leading-relaxed text-slate-500">${selectedPaymentMethod === 'PHONE' ? 'You approve this total on your phone with your PIN. The agency still confirms your ticket.' : selectedPaymentMethod === 'WAAFI' ? 'You authorize WaafiPay to charge this displayed estimate now. The agency still confirms ticket availability and issuance.' : 'Estimate only. The agency confirms the final price and payment directly with you.'}</p>
       `;
 
       const btnBox = document.getElementById('workflowActionButtons');
-      btnBox.innerHTML = `<button type="button" onclick="submitBookingRequest()" class="w-full py-3 rounded-xl ${selectedPaymentMethod === 'WAAFI' ? 'bg-gradient-to-r from-blue-500 to-fuchsia-500 text-white' : 'bg-gradient-to-r from-blue-400 to-cyan-400 text-black'} font-extrabold text-sm">${selectedPaymentMethod === 'WAAFI' ? 'Continue to WaafiPay' : 'Send booking request'}</button>`;
+      btnBox.innerHTML = `<button type="button" onclick="submitBookingRequest()" class="w-full py-3 rounded-xl ${paysOnline ? 'bg-gradient-to-r from-blue-500 to-fuchsia-500 text-white' : 'bg-gradient-to-r from-blue-400 to-cyan-400 text-black'} font-extrabold text-sm">${selectedPaymentMethod === 'PHONE' ? `Pay ${formatMoney(fin.customerGrandTotalCents)} by phone` : selectedPaymentMethod === 'WAAFI' ? 'Continue to WaafiPay' : 'Send booking request'}</button>`;
     }
 
     function updateBookingPaymentNote() {
@@ -7717,9 +7970,31 @@
           : currentUser?.role === 'CLIENT'
             ? 'Mobile wallet checkout. Ticket issuance is confirmed by the agency.'
             : 'Online checkout is available to signed-in traveler accounts.';
+      const phoneAvailable = (phonePaymentMethods.phoneWaafi || phonePaymentMethods.phoneEdahab) && currentUser?.role === 'CLIENT' && currentCurrency === 'USD';
+      const phoneOption = document.getElementById('phonePaymentOption');
+      const phoneRadio = document.getElementById('phonePaymentRadio');
+      if (phoneOption) {
+        phoneOption.classList.toggle('hidden', !phoneAvailable);
+        phoneOption.classList.toggle('flex', phoneAvailable);
+      }
+      if (phoneRadio && !phoneAvailable && phoneRadio.checked) {
+        phoneRadio.checked = false;
+        const requestRadio = document.querySelector('input[name="bookingPaymentMethod"][value="REQUEST_ONLY"]');
+        if (requestRadio) requestRadio.checked = true;
+      }
+      const walletSelect = document.getElementById('phonePaymentWallet');
+      if (walletSelect) {
+        walletSelect.querySelector('option[value="WAAFI"]').disabled = !phonePaymentMethods.phoneWaafi;
+        walletSelect.querySelector('option[value="EDAHAB"]').disabled = !phonePaymentMethods.phoneEdahab;
+        if (walletSelect.selectedOptions[0]?.disabled) walletSelect.value = phonePaymentMethods.phoneWaafi ? 'WAAFI' : 'EDAHAB';
+      }
+      const payingByPhone = phoneAvailable && Boolean(phoneRadio?.checked);
+      document.getElementById('phonePaymentFields')?.classList.toggle('hidden', !payingByPhone);
       const note = document.getElementById('bookingPaymentNote');
       const paying = canPay && radio?.checked;
-      if (note) note.textContent = paying
+      if (note) note.textContent = payingByPhone
+        ? 'You pay the total now from your phone. The agency still confirms your ticket.'
+        : paying
         ? 'WaafiPay charges the displayed estimate now. The agency must still confirm the ticket; payment status will appear on your receipt.'
         : 'No payment is taken with a booking request. The agency will contact you to confirm availability and the final ticket price.';
       if (selectedOffer) updateFinancialEngineView();
@@ -7923,20 +8198,32 @@
       const canEdit = booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY';
       const canAccept = ['REQUESTED', 'PAYMENT_RECEIVED'].includes(booking.state);
       const canUndoAcceptance = canUndoAgencyBookingAcceptance(booking);
-      const paymentReceived = booking.paymentStatus === 'APPROVED';
+      const paymentReceived = bookingPaymentReceived(booking);
       const canCancel = (booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId)))
+        || (booking.state === 'PAYMENT_RECEIVED' && booking.phonePaymentStatus === 'APPROVED')
         || canEdit && Boolean(booking.offerId);
+      const phoneCheck = booking.state === 'PAYMENT_PENDING' && booking.phonePaymentStatus === 'UNKNOWN';
+      document.getElementById('agencyBookingPhonePaidAction').classList.toggle('hidden', !phoneCheck);
+      document.getElementById('agencyBookingPhoneUnpaidAction').classList.toggle('hidden', !phoneCheck);
+      const phoneCheckNote = document.getElementById('agencyBookingPhoneCheckNote');
+      phoneCheckNote.classList.toggle('hidden', !phoneCheck);
+      phoneCheckNote.textContent = phoneCheck
+        ? `We could not confirm the phone payment of ${usdText(booking.phonePaymentAmountCents ?? booking.financials?.customerGrandTotalCents)} from ${booking.phonePaymentAccount}. Check your ${booking.phonePaymentProvider === 'EDAHAB' ? 'eDahab' : 'WaafiPay'} merchant portal first, then choose below.`
+        : '';
       document.getElementById('agencyBookingActionsTitle').textContent = `Request ${booking.ref}`;
       document.getElementById('agencyBookingActionsDescription').textContent = `${booking.travelerName} · ${booking.offerTitle}`;
       document.getElementById('agencyBookingEditAction').classList.toggle('hidden', !canEdit);
       document.getElementById('agencyBookingApproveAction').classList.toggle('hidden', !canAccept);
       document.getElementById('agencyBookingUndoAcceptanceAction').classList.toggle('hidden', !canUndoAcceptance);
-      document.getElementById('agencyBookingRefundAction').classList.toggle('hidden', booking.refundStatus !== 'NEEDED');
+      document.getElementById('agencyBookingRefundAction').classList.toggle('hidden', !['NEEDED', 'UNCONFIRMED'].includes(booking.refundStatus));
+      document.getElementById('agencyBookingRefundActionLabel').textContent = booking.refundStatus === 'UNCONFIRMED'
+        ? 'Check and record the refund'
+        : phonePaymentMethods.autoRefunds ? 'Send or record refund' : 'Record refund sent to traveler';
       const cancelButton = document.getElementById('agencyBookingCancelAction');
       cancelButton.classList.toggle('hidden', !canEdit && !canCancel);
       cancelButton.disabled = !canCancel;
       cancelButton.classList.toggle('opacity-50', !canCancel);
-      document.getElementById('agencyBookingCancelActionLabel').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request';
+      document.getElementById('agencyBookingCancelActionLabel').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : paymentReceived ? 'Cancel paid booking' : 'Delete request';
       const retentionNote = document.getElementById('agencyBookingRetentionNote');
       retentionNote.classList.toggle('hidden', !canCancel);
       retentionNote.textContent = paymentReceived
@@ -7970,7 +8257,7 @@
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Traveler</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.travelerName)}</div><div class="mt-1 break-all text-[10px] text-slate-400">${escapeHtml(booking.travelerEmail || 'No email')} · ${escapeHtml(booking.phone)}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Trip</div><div class="mt-1 font-bold text-white">${escapeHtml(booking.offerTitle)}</div><div class="mt-1 text-[10px] text-slate-400">${escapeHtml(booking.category)}${booking.travelDate ? ` · ${escapeHtml(booking.travelDate)}` : ' · Flexible date'}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Seats requested</div><div class="mt-1 font-bold text-white">${Number(booking.seatCount) || 1}</div><div class="mt-1 text-[10px] text-slate-400">Booking code: ${escapeHtml(booking.pnr)}</div></div>
-          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}${refundBadge(booking)}</div><div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
+          <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Status and estimate</div><div class="mt-1">${bookingStatePresentation(booking.state)}${phonePaymentBadge(booking)}${refundBadge(booking)}</div>${phonePaymentState(booking) ? `<div class="mt-2 text-[10px] text-slate-400">Pay by phone: ${escapeHtml(phoneWalletLabel(booking.phonePaymentProvider))} · ${escapeHtml(booking.phonePaymentAccount || '')}${booking.phonePaymentTransactionId ? ` · Transaction ${escapeHtml(booking.phonePaymentTransactionId)}` : ''}${booking.phonePaymentMessage ? `<br>${escapeHtml(booking.phonePaymentMessage)}` : ''}</div>` : ''}<div class="mt-2 font-bold text-blue-300">${formatMoney(booking.financials.customerGrandTotalCents)}</div></div>
           <div class="rounded-xl bg-white/[.04] p-3"><div class="text-[10px] text-slate-500">Record timestamps</div><div class="mt-1 text-[10px] text-slate-300">Created: ${escapeHtml(formatBookingDateTime(booking.createdAtUtc))}</div><div class="mt-1 text-[10px] text-slate-300">Updated: ${escapeHtml(formatBookingDateTime(booking.updatedAtUtc || booking.createdAtUtc))}</div></div>
         </div>`;
       const modal = document.getElementById('agencyBookingDetailsModal');
@@ -8130,14 +8417,15 @@
 
     function cancelActiveAgencyBooking() {
       const booking = getActiveAgencyBooking();
-      const paymentReceived = booking?.paymentStatus === 'APPROVED';
+      const paymentReceived = bookingPaymentReceived(booking);
       const canCancel = booking && (
         booking.state === 'ACCEPTED' && (paymentReceived || Boolean(booking.offerId))
+        || booking.state === 'PAYMENT_RECEIVED' && booking.phonePaymentStatus === 'APPROVED'
         || booking.state === 'REQUESTED' && booking.paymentProvider === 'REQUEST_ONLY' && Boolean(booking.offerId)
       );
       if (!canCancel) return;
       closeAgencyBookingActions();
-      document.getElementById('agencyBookingCancelTitle').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete booking request';
+      document.getElementById('agencyBookingCancelTitle').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : paymentReceived ? 'Cancel paid booking' : 'Delete booking request';
       document.getElementById('agencyBookingCancelDescription').textContent = paymentReceived
         ? 'Payment was received. Canceling here will not automatically refund the traveler.'
         : 'This request will be removed from the active list and its seats returned.';
@@ -8150,7 +8438,7 @@
         ? 'Return the seats to available inventory. Select this only if the travel ticket was not issued and the seats are free to sell again.'
         : 'This older booking has no linked trip record, so its seats will stay reserved.';
       document.getElementById('agencyBookingCancelReason').value = '';
-      document.getElementById('agencyBookingCancelSave').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : 'Delete request';
+      document.getElementById('agencyBookingCancelSave').textContent = booking.state === 'ACCEPTED' ? 'Cancel accepted booking' : paymentReceived ? 'Cancel paid booking' : 'Delete request';
       const modal = document.getElementById('agencyBookingCancelModal');
       modal.classList.remove('hidden');
       modal.classList.add('flex');
@@ -8168,7 +8456,7 @@
       const booking = getActiveAgencyBooking();
       if (!booking) return;
       const reason = document.getElementById('agencyBookingCancelReason').value.trim();
-      const paymentReceived = booking.paymentStatus === 'APPROVED';
+      const paymentReceived = bookingPaymentReceived(booking);
       const returnSeats = !paymentReceived || document.getElementById('agencyBookingReturnSeats').checked;
       const button = document.getElementById('agencyBookingCancelSave');
       button.disabled = true;
@@ -8258,8 +8546,9 @@
           const canUndoAcceptance = canUndoAgencyBookingAcceptance(b);
           const canToggleAcceptance = canAccept || canUndoAcceptance;
           const canEdit = b.state === 'REQUESTED' && b.paymentProvider === 'REQUEST_ONLY';
-          const paymentReceived = b.paymentStatus === 'APPROVED';
-          const canCancel = (b.state === 'ACCEPTED' && (paymentReceived || Boolean(b.offerId))) || (canEdit && Boolean(b.offerId));
+          const paymentReceived = bookingPaymentReceived(b);
+          const canCancel = (b.state === 'ACCEPTED' && (paymentReceived || Boolean(b.offerId))) || (canEdit && Boolean(b.offerId))
+            || (b.state === 'PAYMENT_RECEIVED' && b.phonePaymentStatus === 'APPROVED');
           const canContact = Boolean(b.customerId);
           const menuId = escapeHtml(b.id);
           return `
@@ -8271,7 +8560,8 @@
               <td data-label="Estimated total" class="p-3 font-mono-code">${formatMoney(b.financials.customerGrandTotalCents)}</td>
               <td data-label="Potential commission" class="p-3 font-mono-code text-blue-400">${formatMoney(b.financials.agencyCommissionCents)}</td>
               <td data-label="Status and actions" class="min-w-[150px] p-3 text-right"><div class="agency-booking-row-actions">
-                ${bookingStatePresentation(b.state)}${refundBadge(b)}
+                ${bookingStatePresentation(b.state)}${phonePaymentBadge(b)}${refundBadge(b)}
+                ${b.state === 'PAYMENT_PENDING' && b.phonePaymentStatus === 'UNKNOWN' ? `<button type="button" onclick="openAgencyBookingActions('${menuId}')" class="agency-booking-icon-button" aria-label="Check the phone payment for booking ${escapeHtml(b.ref)}" title="Check the phone payment"><i class="fa-solid fa-magnifying-glass-dollar" aria-hidden="true"></i></button>` : ''}
                 ${canToggleAcceptance ? `<button id="agencyBookingToggle_${menuId}" type="button" onclick="toggleAgencyBookingAcceptance('${menuId}')" class="booking-approve-button ${canUndoAcceptance ? 'booking-undo-button' : ''}" aria-label="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'} for booking ${escapeHtml(b.ref)}" title="${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}"><i class="fa-solid ${canUndoAcceptance ? 'fa-rotate-left' : 'fa-check'}" aria-hidden="true"></i><span>${canUndoAcceptance ? 'Undo acceptance' : 'Approve request'}</span></button>` : ''}
                 <button type="button" onclick="viewAgencyBookingFromRow('${menuId}')" class="agency-booking-icon-button" aria-label="View booking details for ${escapeHtml(b.ref)}" title="View booking details"><i class="fa-regular fa-eye" aria-hidden="true"></i></button>
                 <button type="button" onclick="contactTravelerFromBooking('${menuId}',event)" class="agency-booking-icon-button ${canContact ? '' : 'opacity-50'}" ${canContact ? '' : 'disabled title="Traveler account not linked"'} aria-label="Contact traveler for ${escapeHtml(b.ref)}" title="Contact traveler"><i class="fa-regular fa-comments" aria-hidden="true"></i></button>
@@ -8924,7 +9214,7 @@
           ${b.cancellationReason ? `<div class="text-amber-200 font-sans">Cancellation reason: ${escapeHtml(b.cancellationReason)}</div>` : ''}
           ${b.travelDate ? `<div class="text-slate-400">Travel date: ${escapeHtml(b.travelDate)}</div>` : ''}
           <div class="text-slate-400">Traveler: ${escapeHtml(b.travelerName)} • ${escapeHtml(b.travelerEmail || '')} • ${escapeHtml(b.phone)}</div>
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-fuchsia-400/10 bg-gradient-to-r from-blue-500/[0.08] to-fuchsia-500/[0.08] p-2.5"><span class="font-bold text-blue-200">${b.paymentStatus === 'APPROVED' ? 'Paid with WaafiPay' : b.paymentProvider === 'WAAFI' ? 'WaafiPay ticket payment' : 'Estimated total - not paid'}</span><span class="font-bold text-fuchsia-200">${formatMoney(b.financials.customerGrandTotalCents)}</span></div>
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-fuchsia-400/10 bg-gradient-to-r from-blue-500/[0.08] to-fuchsia-500/[0.08] p-2.5"><span class="font-bold text-blue-200">${b.paymentStatus === 'APPROVED' ? 'Paid with WaafiPay' : b.phonePaymentStatus === 'APPROVED' ? 'Paid by phone' : b.paymentProvider === 'WAAFI' ? 'WaafiPay ticket payment' : b.paymentProvider === 'PHONE' ? 'Pay by phone' : 'Estimated total - not paid'}</span><span class="font-bold text-fuchsia-200">${formatMoney(b.financials.customerGrandTotalCents)}</span></div>
           ${b.paymentReference ? `<div class="break-all text-[10px] text-slate-500">Payment ref: ${escapeHtml(b.paymentReference)}${b.paymentTransactionId ? ` | Transaction: ${escapeHtml(b.paymentTransactionId)}` : ''}</div>` : ''}
           ${b.paymentStatus === 'PENDING' && b.paymentReference ? `<button type="button" onclick="refreshTicketPayment('${escapeHtml(b.paymentReference)}')" class="rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] font-bold text-blue-200">Check payment status</button>` : ''}
           ${b.state === 'ACCEPTED' ? `<button type="button" onclick="openBookingTicket('${escapeHtml(b.id)}')" class="rounded-lg border border-[#C909E6]/25 bg-[#C909E6]/10 px-3 py-2 text-[10px] font-bold text-[#E27BF5]"><i class="fa-solid fa-file-pdf mr-1"></i> View booking confirmation PDF</button>` : ''}
@@ -9096,7 +9386,7 @@
         : `Cancel approved booking ${booking.ref}? Any payment refund must be handled separately.`)) return;
       let returnSeats = true;
       let confirmTicketNotIssued = false;
-      if (!pending && booking.paymentStatus === 'APPROVED') {
+      if (!pending && bookingPaymentReceived(booking)) {
         returnSeats = confirm('Return its seats to inventory? Choose Cancel to keep them reserved.');
         confirmTicketNotIssued = !returnSeats || confirm('Confirm the travel ticket was not issued before returning its seats.');
         if (returnSeats && !confirmTicketNotIssued) return;
@@ -9195,6 +9485,7 @@
             ${b.ticketIssuedAt ? `<div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Issued</div><div class="mt-1 text-slate-200">${escapeHtml(new Date(b.ticketIssuedAt).toLocaleString())}</div></div>` : ''}
             ${b.ticketEmailStatus ? `<div><div class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Email delivery</div><div class="mt-1 text-slate-200">${escapeHtml(({ PENDING: 'Sending…', SENT: 'Sent to your email', FAILED: 'Not delivered – tap Retry Email or check your email address' })[b.ticketEmailStatus] || 'Unknown')}${b.ticketEmailSentAt ? ` · ${escapeHtml(new Date(b.ticketEmailSentAt).toLocaleString())}` : ''}</div></div>` : ''}
           </div>
+          ${travelerPhonePaymentMarkup(b)}
           ${b.ticketStatus === 'FAILED' ? '<p class="px-4 pb-3 text-xs text-rose-200">Ticket generation failed. Your approved booking remains active; retry generation without rebooking.</p>' : ''}
           <div class="flex flex-wrap items-center gap-2 border-t border-white/10 px-4 py-3">${ticketActions}${managementActions}</div>
           <div class="no-print">${tripReviewMarkup(b)}</div>
@@ -9922,6 +10213,7 @@
       try {
         const methods = await apiRequest('/api/payments/methods');
         waafiCheckoutEnabled = Boolean(methods.waafiEnabled);
+        phonePaymentMethods = { phoneWaafi: Boolean(methods.phoneWaafi), phoneEdahab: Boolean(methods.phoneEdahab), autoRefunds: Boolean(methods.autoRefunds) };
         const testModeBadge = document.getElementById('paymentTestModeBadge');
         testModeBadge.classList.toggle('hidden', methods.waafiEnvironment !== 'sandbox');
         testModeBadge.classList.toggle('md:block', methods.waafiEnvironment === 'sandbox');
@@ -10001,5 +10293,6 @@
       }
     });
   </script>
+  <script defer src="/plugins/all.js"></script>
 </body>
 </html>

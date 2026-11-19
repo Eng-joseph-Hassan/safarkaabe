@@ -471,3 +471,369 @@ test('reviews, payment notifications, status audiences and saved offers', async 
 
   assert.doesNotMatch(serverErrors, /TypeError|ReferenceError|SyntaxError|SQLITE_|notification could not be created|Unhandled/, serverErrors);
 });
+
+test('pay by phone and automatic refunds through marupay', async t => {
+  const { DatabaseSync } = require('node:sqlite');
+  const crypto = require('node:crypto');
+  const gateway = require('../marupay-gateway');
+
+  // ---- Phone number normalisation ----
+  for (const input of ['612345678', '0612345678', '252612345678', '+252612345678', '+252 61 234 5678', '00252612345678', '061-234-5678']) {
+    assert.equal(gateway.normalizeSomaliPhone(input), '+252612345678', input);
+  }
+  for (const input of ['12345', '+254712345678', 'abc', '+2526123', '25261234567890', '', null, '512345678']) {
+    assert.equal(gateway.normalizeSomaliPhone(input), null, String(input));
+  }
+
+  // ---- Only clear "no money moved" answers count as FAILED; anything unclear is UNKNOWN ----
+  const vendorError = (name, code, message) => Object.assign(new Error(message || 'Vendor error'), { name, code, message });
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorInsufficientBalance', 'INSUFFICIENT-BALANCE'), 'WAAFI', 'purchase'), true);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorAccountNotFound', 'ACCOUNT-NOT-FOUND'), 'EDAHAB', 'purchase'), true);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorInsufficientBalance', 'INSUFFICIENT-BALANCE'), 'WAAFI', 'credit'), true);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', 'E10205', 'RCS_USER_REJECTED'), 'WAAFI', 'purchase'), true, 'the customer refused the PIN prompt');
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', undefined, undefined), 'WAAFI', 'purchase'), false, 'an empty Waafi reply is unclear');
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', 'E10999', 'RCS_SOMETHING_NEW'), 'WAAFI', 'purchase'), false);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', '0', 'Unpaid'), 'EDAHAB', 'purchase'), false, 'an unpaid invoice can still be paid');
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', 'undefined', undefined), 'EDAHAB', 'purchase'), false);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', '3', 'Rejected'), 'EDAHAB', 'purchase'), true);
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', 'E10205', 'RCS_USER_REJECTED'), 'WAAFI', 'credit'), false, 'an unclear refund is never treated as not sent');
+  assert.equal(gateway.isDefiniteFailure(vendorError('VendorErrorException', undefined, 'EDAHAB-CREDIT-ERROR'), 'EDAHAB', 'credit'), false);
+  assert.equal(gateway.isDefiniteFailure(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }), 'WAAFI', 'purchase'), false);
+
+  // Fake WaafiPay API + eDahab API. Behaviour depends on the phone number:
+  // ...1111111 approves, ...2222222 has no balance, ...3333333 never answers, ...4444444 is not registered.
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'safar-kaabe-phonepay-'));
+  const vendorCalls = [];
+  const hung = [];
+  let transactionCounter = 0;
+  let creditBehaviour = 'approve'; // 'approve' | 'broke' | 'unclear'
+  const edahabSecret = 'edahab-secret';
+  const vendor = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString('utf8');
+    const body = JSON.parse(raw);
+    const reply = payload => response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(payload));
+    if (request.url === '/asm') {
+      const params = body.serviceParams;
+      const account = params.payerInfo.accountNo;
+      vendorCalls.push({ provider: 'WAAFI', service: body.serviceName, account, amount: params.transactionInfo.amount, currency: params.transactionInfo.currency,
+        merchantUid: params.merchantUid, apiUserId: params.apiUserId, apiKey: params.apiKey });
+      if (account.endsWith('3333333')) { hung.push(response); return; }
+      if (body.serviceName === 'API_CREDITACCOUNT' && creditBehaviour === 'broke') { reply({ responseCode: '5206', errorCode: 'E101073', responseMsg: 'RCS_USER_INSUFFICIENT_BALANCE' }); return; }
+      if (body.serviceName === 'API_CREDITACCOUNT' && creditBehaviour === 'unclear') { reply({}); return; }
+      if (account.endsWith('2222222')) { reply({ responseCode: '5206', errorCode: 'E101073', responseMsg: 'RCS_USER_INSUFFICIENT_BALANCE' }); return; }
+      if (account.endsWith('4444444')) { reply({ responseCode: '5206', errorCode: 'E10205', responseMsg: 'RCS_NO_ROUTE_FOUND' }); return; }
+      await new Promise(resolve => setTimeout(resolve, 300));
+      transactionCounter += 1;
+      reply({ responseCode: '2001', responseMsg: 'RCS_SUCCESS', params: {
+        transactionId: `${body.serviceName === 'API_PURCHASE' ? 'W-TX' : 'W-CR'}-${transactionCounter}`, state: 'APPROVED', referenceId: params.transactionInfo.referenceId } });
+      return;
+    }
+    const [route, hash] = request.url.split('?hash=');
+    const validHash = hash === crypto.createHash('sha256').update(JSON.stringify(body) + edahabSecret).digest('hex');
+    const account = body.edahabNumber || body.phoneNumber;
+    vendorCalls.push({ provider: 'EDAHAB', service: route, account, amount: body.amount ?? body.transactionAmount, validHash, agentCode: body.agentCode });
+    if (!validHash) { reply({ StatusCode: 1, InvoiceStatus: 'Unpaid' }); return; }
+    if (account.endsWith('3333333')) { hung.push(response); return; }
+    if (route === '/api/issueinvoice' && account.endsWith('5555555')) { reply({ InvoiceStatus: 'Unpaid', StatusCode: 0, InvoiceId: 2 }); return; }
+    transactionCounter += 1;
+    if (route === '/api/issueinvoice') reply({ InvoiceStatus: 'Paid', TransactionId: `E-TX-${transactionCounter}`, InvoiceId: 1, StatusCode: 0 });
+    else reply({ TransactionStatus: 'Approved', TransactionId: `E-CR-${transactionCounter}`, TransactionMesage: 'Approved' });
+  });
+  await new Promise(resolve => vendor.listen(0, '127.0.0.1', resolve));
+  const vendorBase = `http://127.0.0.1:${vendor.address().port}`;
+
+  const port = await availablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  let serverErrors = '';
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test', HOST: '127.0.0.1', PORT: String(port), SAFAR_KAABE_DATA_DIR: dataDir,
+      WAAFI_MERCHANT_UID: 'M0912345', WAAFI_API_USER_ID: '1000297', WAAFI_API_KEY: 'API-test-key', MARUPAY_WAAFI_BASE_URL: `${vendorBase}/asm`,
+      WAAFI_STORE_ID: '', WAAFI_HPP_KEY: '',
+      EDAHAB_API_KEY: 'edahab-key', EDAHAB_SECRET_KEY: edahabSecret, EDAHAB_AGENT_CODE: '7001', EDAHAB_BASE_URL: vendorBase,
+      PHONE_PAYMENT_TIMEOUT_MS: '1500'
+    },
+    stdio: ['ignore', 'ignore', 'pipe']
+  });
+  child.stderr.setEncoding('utf8').on('data', chunk => { serverErrors += chunk; });
+  t.after(async () => {
+    child.kill();
+    await new Promise(resolve => child.once('exit', resolve));
+    for (const response of hung) response.destroy();
+    vendor.closeAllConnections?.();
+    await new Promise(resolve => vendor.close(resolve));
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  async function request(route, { method = 'GET', body, as } = {}) {
+    const headers = { Origin: baseUrl };
+    if (as) { headers.Cookie = as.cookie; headers['X-CSRF-Token'] = as.csrf; }
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    try {
+      return await fetch(`${baseUrl}${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (error) {
+      throw new Error(`${method} ${route} failed: ${error.message}\n${serverErrors}`, { cause: error });
+    }
+  }
+  const json = async (route, options, expectedStatus = 200) => {
+    const response = await request(route, options);
+    const payload = await response.json().catch(() => ({}));
+    assert.equal(response.status, expectedStatus, `${options?.method || 'GET'} ${route}: ${JSON.stringify(payload)}`);
+    return payload;
+  };
+  const session = response => { const cookie = cookieJar(response); return { cookie, csrf: csrfToken(cookie) }; };
+
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    try { if ((await request('/api/setup/status')).ok) break; } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  const admin = session(await request('/api/setup/admin', { method: 'POST', body: { name: 'Admin', email: 'admin@example.test', password: 'long-enough-admin-password' } }));
+  const { agency } = await json('/api/agencies', { method: 'POST', as: admin, body: {
+    name: 'Bay Travel', tier: 'PROFESSIONAL', markupPct: 5, ownerName: 'Agency Owner', ownerEmail: 'owner@bay.test', ownerPassword: 'long-enough-agency-password'
+  } }, 201);
+  await json(`/api/agencies/${agency.id}/status`, { method: 'PATCH', as: admin, body: { action: 'APPROVE' } });
+  const staff = session(await request('/api/auth/login', { method: 'POST', body: { email: 'owner@bay.test', password: 'long-enough-agency-password' } }));
+  const traveler = session(await request('/api/auth/register', { method: 'POST', body: { name: 'Amina Hassan Ali', email: 'amina@example.test', phone: '+252611111111', password: 'long-enough-traveler-password' } }));
+  const stranger = session(await request('/api/auth/register', { method: 'POST', body: { name: 'Other Traveler', email: 'other@example.test', phone: '+252600000002', password: 'long-enough-traveler-password' } }));
+  assert.ok(staff.csrf && traveler.csrf && stranger.csrf);
+
+  const methods = await json('/api/payments/methods');
+  assert.equal(methods.phoneWaafi, true);
+  assert.equal(methods.phoneEdahab, true);
+  assert.equal(methods.autoRefunds, true);
+  assert.equal(methods.waafiEnabled, false, 'hosted checkout stays off without its own keys');
+
+  const { product: offer } = await json('/api/catalog', { method: 'POST', as: staff, body: { title: 'Baidoa city tour', destination: 'BDB', category: 'TOUR', price: 50, available: 20 } }, 201);
+  const seats = async () => (await json('/api/catalog')).catalog.find(item => item.id === offer.id).available;
+  const book = (paymentPhone, wallet = 'WAAFI', as = traveler) => json('/api/bookings', { method: 'POST', as, body: {
+    offerId: offer.id, travelerName: 'Amina Hassan Ali', phone: '+252611111111', paymentMethod: 'PHONE', wallet, paymentPhone } }, 201);
+  const charge = (bookingId, as = traveler) => request(`/api/payments/phone/${bookingId}/charge`, { method: 'POST', as });
+  const bookingAs = async (bookingId, as = staff) => (await json('/api/bookings', { as })).bookings.find(item => item.id === bookingId);
+  const purchasesFor = account => vendorCalls.filter(call => ['API_PURCHASE', '/api/issueinvoice'].includes(call.service) && call.account === account).length;
+  const creditsFor = account => vendorCalls.filter(call => ['API_CREDITACCOUNT', '/api/agentPayment'].includes(call.service) && call.account === account).length;
+
+  // ---- Bad numbers and permissions ----
+  const badNumber = await request('/api/bookings', { method: 'POST', as: traveler, body: { offerId: offer.id, travelerName: 'Amina', phone: '+252611111111', paymentMethod: 'PHONE', wallet: 'WAAFI', paymentPhone: '+254712345678' } });
+  assert.equal(badNumber.status, 400);
+  assert.match((await badNumber.json()).error, /mobile money number/);
+  assert.equal((await request('/api/bookings', { method: 'POST', as: traveler, body: { offerId: offer.id, travelerName: 'Amina', phone: '+252611111111', paymentMethod: 'PHONE', wallet: 'MPESA', paymentPhone: '611111111' } })).status, 400);
+  assert.equal(await seats(), 20, 'rejected phone checkouts do not hold seats');
+
+  // ---- Approved payment, and a double tap only charges once ----
+  const { booking: paid, phonePayment } = await book('0611111111');
+  assert.equal(paid.state, 'PAYMENT_PENDING');
+  assert.equal(phonePayment.accountNumber, '+252611111111');
+  assert.equal(phonePayment.amountCents, 7050);
+  assert.equal(await seats(), 19, 'the seat is held while the traveler approves');
+  assert.equal((await charge(paid.id, stranger)).status, 404, 'nobody else can charge this booking');
+  assert.equal((await charge(paid.id, staff)).status, 403, 'only the traveler starts the charge');
+  const [first, second] = await Promise.all([charge(paid.id), charge(paid.id)]);
+  assert.deepEqual([first.status, second.status].sort(), [200, 409], 'a second tap while charging is refused');
+  const approved = [first, second].find(item => item.status === 200);
+  assert.equal((await approved.json()).payment.status, 'APPROVED');
+  const again = await json(`/api/payments/phone/${paid.id}/charge`, { method: 'POST', as: traveler });
+  assert.equal(again.alreadyFinished, true);
+  assert.equal(purchasesFor('252611111111'), 1, 'the wallet was charged exactly once');
+  const purchaseCall = vendorCalls.find(call => call.service === 'API_PURCHASE');
+  assert.deepEqual([purchaseCall.amount, purchaseCall.currency, purchaseCall.merchantUid, purchaseCall.apiUserId, purchaseCall.apiKey],
+    [70.5, 'USD', 'M0912345', '1000297', 'API-test-key']);
+  let view = await bookingAs(paid.id, traveler);
+  assert.equal(view.state, 'PAYMENT_RECEIVED');
+  assert.equal(view.phonePaymentStatus, 'APPROVED');
+  assert.equal(view.phonePaymentProvider, 'WAAFI');
+  assert.ok((await json('/api/notifications', { as: traveler })).notifications.some(item => item.type === 'PAYMENT_CONFIRMED' && item.bookingId === paid.id));
+  assert.ok((await json('/api/notifications', { as: staff })).notifications.some(item => item.type === 'PAYMENT_RECEIVED' && item.bookingId === paid.id));
+
+  // ---- eDahab ----
+  const { booking: edahabBooking } = await book('+252 65 1111111', 'EDAHAB');
+  assert.equal((await json(`/api/payments/phone/${edahabBooking.id}/charge`, { method: 'POST', as: traveler })).payment.status, 'APPROVED');
+  const invoiceCall = vendorCalls.find(call => call.provider === 'EDAHAB');
+  assert.deepEqual([invoiceCall.account, invoiceCall.amount, invoiceCall.validHash, invoiceCall.agentCode], ['651111111', 70.5, true, '7001']);
+
+  // ---- Definite failures cancel the booking and free the seat ----
+  const seatsBeforeFailure = await seats();
+  const { booking: broke } = await book('612222222');
+  assert.equal(await seats(), seatsBeforeFailure - 1);
+  const brokeResult = await json(`/api/payments/phone/${broke.id}/charge`, { method: 'POST', as: traveler });
+  assert.equal(brokeResult.payment.status, 'FAILED');
+  assert.match(brokeResult.payment.message, /Not enough balance in your wallet/);
+  assert.equal((await bookingAs(broke.id)).state, 'CANCELLED');
+  assert.equal(await seats(), seatsBeforeFailure, 'a failed payment returns the seat');
+  const { booking: unknownNumber } = await book('614444444');
+  const notRegistered = await json(`/api/payments/phone/${unknownNumber.id}/charge`, { method: 'POST', as: traveler });
+  assert.equal(notRegistered.payment.status, 'FAILED');
+  assert.match(notRegistered.payment.message, /not registered for EVC Plus, Zaad or Sahal/);
+  assert.equal((await charge(unknownNumber.id)).status, 200, 'a finished payment is reported, not charged again');
+  assert.equal(purchasesFor('252614444444'), 1);
+
+  // An eDahab invoice that is still "Unpaid" (the PIN prompt may still be open) is not a failure: the seats stay held.
+  const { booking: unpaidInvoice } = await book('655555555', 'EDAHAB');
+  const unpaidResult = await json(`/api/payments/phone/${unpaidInvoice.id}/charge`, { method: 'POST', as: traveler });
+  assert.equal(unpaidResult.payment.status, 'UNKNOWN');
+  assert.equal((await bookingAs(unpaidInvoice.id)).state, 'PAYMENT_PENDING');
+  assert.ok(!(await json('/api/notifications', { as: traveler })).notifications.some(item => item.type === 'PAYMENT_FAILED' && item.bookingId === unpaidInvoice.id),
+    'the traveler is not told "no money was taken"');
+
+  // PIN prompts to one number are limited, whoever asks.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { booking: spam } = await book('614444444', 'WAAFI', stranger);
+    assert.equal((await charge(spam.id, stranger)).status, 200);
+  }
+  const { booking: spamLimited } = await book('614444444', 'WAAFI', stranger);
+  assert.equal((await charge(spamLimited.id, stranger)).status, 429, 'too many payment requests to one number');
+  assert.equal(purchasesFor('252614444444'), 5);
+  await json(`/api/bookings/${spamLimited.id}`, { method: 'DELETE', as: stranger, body: { reason: 'Limited' } });
+  const closedUnpaid = (await bookingAs(spamLimited.id, stranger));
+  assert.equal(closedUnpaid.state, 'CANCELLED');
+  assert.equal(closedUnpaid.phonePaymentStatus, 'PENDING', 'a never-charged payment stays PENDING (the page shows it as not charged)');
+
+  // ---- No answer: status UNKNOWN, seats kept, agency decides ----
+  const { booking: slow } = await book('613333333');
+  const { booking: slowRejected } = await book('613333333');
+  const { booking: neverCharged } = await book('611111111');
+  const seatsWhileUnknown = await seats();
+  const slowResult = await json(`/api/payments/phone/${slow.id}/charge`, { method: 'POST', as: traveler });
+  assert.equal(slowResult.payment.status, 'UNKNOWN');
+  assert.equal((await json(`/api/payments/phone/${slowRejected.id}/charge`, { method: 'POST', as: traveler })).payment.status, 'UNKNOWN');
+  assert.equal((await json(`/api/payments/phone/${slow.id}/charge`, { method: 'POST', as: traveler })).payment.status, 'UNKNOWN', 'never retried automatically');
+  assert.equal(purchasesFor('252613333333'), 2);
+  assert.ok((await json('/api/notifications', { as: staff })).notifications.some(item => item.type === 'PAYMENT_CHECK_NEEDED' && item.bookingId === slow.id),
+    'the agency is asked to check the merchant portal');
+  assert.equal((await request(`/api/bookings/${slow.id}`, { method: 'DELETE', as: traveler, body: { reason: 'Changed my mind' } })).status, 409,
+    'an unchecked phone payment cannot be deleted');
+  const oldDate = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const database = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  database.prepare('UPDATE bookings SET created_at = ? WHERE id IN (?, ?, ?)').run(oldDate, slow.id, slowRejected.id, neverCharged.id);
+  database.close();
+  assert.equal(await seats(), seatsWhileUnknown + 1, 'the sweep frees an old checkout that was never charged');
+  assert.equal((await bookingAs(neverCharged.id)).state, 'CANCELLED');
+  assert.equal((await bookingAs(slow.id)).state, 'PAYMENT_PENDING', 'the sweep keeps seats for a payment that must be checked');
+  assert.equal((await bookingAs(slow.id)).phonePaymentStatus, 'UNKNOWN');
+  assert.equal((await request(`/api/bookings/${slow.id}`, { method: 'PATCH', as: traveler, body: { action: 'CONFIRM_PHONE_PAYMENT' } })).status, 403);
+  const confirmed = await json(`/api/bookings/${slow.id}`, { method: 'PATCH', as: staff, body: { action: 'CONFIRM_PHONE_PAYMENT', transactionId: 'PORTAL-77' } });
+  assert.equal(confirmed.booking.state, 'PAYMENT_RECEIVED');
+  assert.equal(confirmed.booking.phonePaymentStatus, 'APPROVED');
+  assert.equal((await request(`/api/bookings/${slow.id}`, { method: 'PATCH', as: staff, body: { action: 'CONFIRM_PHONE_PAYMENT' } })).status, 409);
+  const tooSoon = await request(`/api/bookings/${slowRejected.id}`, { method: 'PATCH', as: staff, body: { action: 'REJECT_PHONE_PAYMENT' } });
+  assert.equal(tooSoon.status, 409, 'a payment cannot be marked "not received" while the PIN prompt may still be open');
+  assert.match((await tooSoon.json()).error, /may still be approving/);
+  const backdate = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  backdate.prepare('UPDATE phone_payments SET started_at = ? WHERE booking_id = ?').run(new Date(Date.now() - 20 * 60 * 1000).toISOString(), slowRejected.id);
+  backdate.close();
+  const rejected = await json(`/api/bookings/${slowRejected.id}`, { method: 'PATCH', as: staff, body: { action: 'REJECT_PHONE_PAYMENT' } });
+  assert.equal(rejected.booking.state, 'CANCELLED');
+  assert.equal(await seats(), seatsWhileUnknown + 2, 'rejecting the payment frees its seat');
+  const rejectNotice = (await json('/api/notifications', { as: traveler })).notifications.find(item => item.bookingId === slowRejected.id && item.type === 'PAYMENT_FAILED');
+  assert.match(rejectNotice.body, /If money was taken/);
+  assert.doesNotMatch(rejectNotice.body, /no money was taken/i);
+
+  // ---- Automatic refunds ----
+  await json(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'ACCEPT' } });
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } })).status, 409, 'no refund before cancellation');
+  await json(`/api/bookings/${paid.id}`, { method: 'DELETE', as: staff, body: { reason: 'Trip cancelled', returnSeats: false } });
+  assert.equal((await bookingAs(paid.id)).refundStatus, 'NEEDED', 'cancelling a phone-paid booking marks a refund as needed');
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: traveler, body: { action: 'SEND_REFUND' } })).status, 403, 'travelers cannot send refunds');
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: stranger, body: { action: 'SEND_REFUND' } })).status, 404);
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND', phoneNumber: '617777777' } })).status, 403,
+    'agency staff cannot send the refund to a different number');
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND', provider: 'EDAHAB' } })).status, 403,
+    'or to a different wallet');
+  assert.equal(creditsFor('252617777777'), 0);
+  const [refundA, refundB] = await Promise.all([
+    request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } }),
+    request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } })
+  ]);
+  assert.deepEqual([refundA.status, refundB.status].sort(), [200, 409], 'a refund cannot be sent twice at once');
+  const refundResult = await [refundA, refundB].find(item => item.status === 200).json();
+  assert.equal(refundResult.refund.outcome, 'APPROVED');
+  assert.equal(refundResult.booking.refundStatus, 'REFUNDED');
+  assert.match(refundResult.booking.refundReference, /^W-CR-/);
+  assert.equal((await request(`/api/bookings/${paid.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } })).status, 409);
+  assert.equal(creditsFor('252611111111'), 1, 'the refund was sent exactly once');
+  const creditCall = vendorCalls.find(call => call.service === 'API_CREDITACCOUNT');
+  assert.equal(creditCall.amount, 70.5);
+  const refundNotice = (await json('/api/notifications', { as: traveler })).notifications.find(item => item.type === 'PAYMENT_REFUNDED' && item.bookingId === paid.id);
+  assert.match(refundNotice.body, /70\.50 USD.*W-CR-/);
+
+  // A payment the agency confirmed by hand is never refunded automatically from the platform wallet.
+  await json(`/api/bookings/${slow.id}`, { method: 'DELETE', as: staff, body: { reason: 'No seats on the bus', returnSeats: true, confirmTicketNotIssued: true } });
+  assert.equal((await bookingAs(slow.id)).refundStatus, 'NEEDED');
+  assert.equal((await bookingAs(slow.id)).phonePaymentVerified, 0);
+  const handConfirmedRefund = await request(`/api/bookings/${slow.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } });
+  assert.equal(handConfirmedRefund.status, 409);
+  assert.match((await handConfirmedRefund.json()).error, /confirmed by hand/);
+  assert.equal(creditsFor('252613333333'), 0);
+  const recordedByHand = await json(`/api/bookings/${slow.id}`, { method: 'PATCH', as: staff, body: { action: 'MARK_REFUNDED', refundReference: 'PORTAL-REFUND-0' } });
+  assert.equal(recordedByHand.booking.refundStatus, 'REFUNDED');
+
+  // A payment that arrives just after the booking was cancelled is flagged for a refund, not announced as a normal payment.
+  const { booking: late } = await book('611111111');
+  const lateCharge = charge(late.id);
+  const lateDb = new DatabaseSync(path.join(dataDir, 'safar-kaabe.sqlite'));
+  for (let attempt = 0; attempt < 100 && !lateDb.prepare('SELECT started_at FROM phone_payments WHERE booking_id = ?').get(late.id)?.started_at; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  lateDb.prepare("UPDATE bookings SET state = 'CANCELLED' WHERE id = ?").run(late.id);
+  lateDb.close();
+  assert.equal((await (await lateCharge).json()).payment.status, 'APPROVED');
+  assert.equal((await bookingAs(late.id)).refundStatus, 'NEEDED');
+  const lateTravelerNotices = (await json('/api/notifications', { as: traveler })).notifications.filter(item => item.bookingId === late.id);
+  assert.ok(lateTravelerNotices.some(item => item.type === 'PAYMENT_NEEDS_REFUND'));
+  assert.ok(!lateTravelerNotices.some(item => item.type === 'PAYMENT_CONFIRMED'), 'no "payment confirmed, the agency will finalize your trip"');
+  const lateAgencyNotices = (await json('/api/notifications', { as: staff })).notifications.filter(item => item.bookingId === late.id);
+  assert.ok(lateAgencyNotices.some(item => item.type === 'PAYMENT_NEEDS_REFUND'));
+  assert.ok(!lateAgencyNotices.some(item => item.type === 'PAYMENT_RECEIVED'), 'no "review and accept the booking"');
+
+  // The refund fails, can be tried again, then gets an unclear answer and is never resent automatically.
+  creditBehaviour = 'broke';
+  const failedRefund = await json(`/api/bookings/${late.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } });
+  assert.equal(failedRefund.refund.outcome, 'FAILED');
+  assert.equal(failedRefund.booking.refundStatus, 'NEEDED', 'a failed refund can be tried again');
+  assert.match(failedRefund.booking.refundNote, /enough balance/);
+  assert.equal((await request(`/api/bookings/${late.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND', phoneNumber: '12' } })).status, 400);
+  creditBehaviour = 'unclear';
+  const unconfirmed = await json(`/api/bookings/${late.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } });
+  assert.equal(unconfirmed.refund.outcome, 'UNKNOWN', 'an empty provider reply is unclear, not a failure');
+  assert.equal(unconfirmed.booking.refundStatus, 'UNCONFIRMED');
+  creditBehaviour = 'approve';
+  assert.equal((await request(`/api/bookings/${late.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } })).status, 409,
+    'an unconfirmed refund is never sent again automatically');
+  assert.equal(creditsFor('252611111111'), 3);
+  const recorded = await json(`/api/bookings/${late.id}`, { method: 'PATCH', as: staff, body: { action: 'MARK_REFUNDED', refundReference: 'PORTAL-REFUND-1' } });
+  assert.equal(recorded.booking.refundStatus, 'REFUNDED');
+
+  // eDahab refund
+  await json(`/api/bookings/${edahabBooking.id}`, { method: 'DELETE', as: staff, body: { reason: 'Agency closed', returnSeats: false } });
+  const edahabRefund = await json(`/api/bookings/${edahabBooking.id}`, { method: 'PATCH', as: staff, body: { action: 'SEND_REFUND' } });
+  assert.equal(edahabRefund.refund.outcome, 'APPROVED');
+  assert.match(edahabRefund.booking.refundReference, /^E-CR-/);
+  assert.equal(vendorCalls.find(call => call.service === '/api/agentPayment').validHash, true);
+
+  // ---- Sales report counts phone payments as paid online ----
+  const report = await json('/api/reports/sales', { as: staff });
+  assert.equal(report.totals.paidOnlineCents, 7050 * 4);
+  const csv = await (await request('/api/reports/sales?format=csv', { as: staff })).text();
+  assert.match(csv, /Pay by phone - EVC Plus, Zaad or Sahal \(APPROVED\)/);
+
+  // ---- The page offers pay-by-phone, the waiting screen, phone checks and automatic refunds ----
+  const page = await (await request('/the%20style.html')).text();
+  assert.match(page, /id="phonePaymentRadio" type="radio" name="bookingPaymentMethod" value="PHONE"/);
+  assert.match(page, /Check your phone and enter your PIN to approve \$\{amount\}/);
+  assert.match(page, /\/api\/payments\/phone\/\$\{encodeURIComponent\(booking\.id\)\}\/charge/);
+  assert.match(page, /action: paid \? 'CONFIRM_PHONE_PAYMENT' : 'REJECT_PHONE_PAYMENT'/);
+  assert.match(page, /Payment received – confirm/);
+  assert.match(page, /Payment not received – cancel/);
+  assert.match(page, /action: 'SEND_REFUND', phoneNumber, provider/);
+  assert.match(page, /Send refund automatically/);
+  assert.match(page, /booking\.state !== 'PAYMENT_PENDING'\) return 'NOT_CHARGED'/, 'a closed, never-charged booking does not say "Tap Pay now"');
+  assert.match(page, /We could not confirm your payment yet', 'Please do not pay again\./, 'a lost connection during the charge is shown as unclear');
+  assert.match(page, /const stillOnThisBooking = activeAgencyBookingId === refundBookingId;/);
+  assert.match(page, /id="agencyRefundPhone" type="tel"[^>]*readonly/);
+
+  assert.doesNotMatch(serverErrors, /TypeError|ReferenceError|SyntaxError|SQLITE_|notification could not be created|Unhandled/, serverErrors);
+});
