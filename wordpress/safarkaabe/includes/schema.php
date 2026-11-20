@@ -146,9 +146,22 @@ function skw_schema() {
 				'id' => 'id', 'conversation_id' => 'id', 'caller_id' => 'id', 'callee_id' => 'id', 'call_type' => 'key',
 				'status' => 'key', 'created_at' => 'date', 'accepted_at' => 'date NULL', 'ended_at' => 'date NULL',
 				'caller_seen_at' => 'date NULL', 'callee_seen_at' => 'date NULL', 'caller_device' => 'key NULL', 'callee_device' => 'key NULL',
+				'push_token' => 'key NULL', 'ring_push_at' => 'date NULL',
 			),
 			'pk'    => 'id',
 			'index' => array( 'caller_id', 'callee_id', 'status' ),
+		),
+		// Browsers and phones that asked for call and message alerts (Web Push).
+		'push_subscriptions'    => array(
+			'cols'   => array( 'id' => 'id', 'user_id' => 'id', 'endpoint_hash' => 'key', 'endpoint' => 'text', 'p256dh' => 'str', 'auth' => 'str', 'created_at' => 'date', 'updated_at' => 'date' ),
+			'pk'     => 'id',
+			'unique' => array( 'endpoint_hash' ),
+			'index'  => array( 'user_id' ),
+		),
+		// Values the plugin creates for itself (for example the push signing key).
+		'settings'              => array(
+			'cols' => array( 'skey' => 'key', 'svalue' => 'text' ),
+			'pk'   => 'skey',
 		),
 		'chat_call_signals'     => array(
 			'cols'  => array( 'id' => 'autoid', 'call_id' => 'id', 'sender_id' => 'id', 'signal_type' => 'key', 'payload_json' => 'text', 'created_at' => 'date' ),

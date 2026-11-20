@@ -74,8 +74,105 @@ function skw_serve_static( $rel ) {
 	} else {
 		header( 'Cache-Control: public, max-age=604800' );
 	}
+	if ( 'html' === $ext ) {
+		skw_send_page( $path );
+		return;
+	}
 	header( 'Content-Length: ' . filesize( $path ) );
 	readfile( $path );
+}
+
+/** Where the browser loads images, styles and the video from (directly from the hosting, without PHP). */
+function skw_asset_base() {
+	global $skw_asset_base;
+	return is_string( $skw_asset_base ) ? $skw_asset_base : '';
+}
+
+/**
+ * Sends the app page. When a person opens it, the first answers the app needs (setup, sign-in, trips, bookings ...)
+ * are put inside the page, so it starts without waiting for more trips to the server.
+ */
+function skw_send_page( $path ) {
+	$html = str_replace( '%%SKW_ASSETS%%', htmlspecialchars( skw_asset_base(), ENT_QUOTES ), (string) file_get_contents( $path ) );
+	$req  = skw_request_from_globals();
+	$mode = isset( $req['headers']['sec-fetch-mode'] ) ? strtolower( (string) $req['headers']['sec-fetch-mode'] ) : '';
+	$boot = '';
+	if ( 'navigate' === $mode && 'GET' === $req['method'] ) {
+		try {
+			$boot = skw_boot_script( $req );
+		} catch ( Throwable $e ) {
+			error_log( 'SAFAR KAABE start-up data: ' . $e->getMessage() );
+			$boot = '';
+		}
+	}
+	if ( '' !== $boot ) {
+		// Personal data: never store this copy anywhere.
+		header( 'Cache-Control: private, no-store' );
+		header( 'Vary: Cookie', false );
+	}
+	$html = str_replace( '<!--SKW_BOOT-->', $boot, $html );
+	header( 'Content-Length: ' . strlen( $html ) );
+	echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the app page.
+}
+
+/** Runs one GET API route inside this request. Returns the JSON text, or null when it did not answer 200. */
+function skw_internal_get( $api_path, $req ) {
+	global $skw_capture_status;
+	skw_load_modules();
+	$req['method']      = 'GET';
+	$req['path']        = $api_path;
+	$req['body']        = '';
+	$req['query']       = array();
+	$skw_capture_status = 0;
+	ob_start();
+	try {
+		skw_dispatch( $req );
+	} finally {
+		$out                = (string) ob_get_clean();
+		$status             = $skw_capture_status;
+		$skw_capture_status = null;
+	}
+	return 200 === $status && '' !== $out ? $out : null;
+}
+
+function skw_boot_script( $req ) {
+	$answers = array();
+	$get     = function ( $p ) use ( &$answers, $req ) {
+		$json = skw_internal_get( '/' . $p, $req );
+		if ( null !== $json ) {
+			$answers[ $p ] = $json;
+		}
+		return $json;
+	};
+	$status = json_decode( (string) $get( 'api/setup/status' ), true );
+	if ( empty( $status['configured'] ) ) {
+		return '';
+	}
+	$session = json_decode( (string) $get( 'api/auth/session' ), true );
+	$user    = is_array( $session ) && ! empty( $session['user'] ) ? $session['user'] : null;
+	if ( $user ) {
+		$get( 'api/portal/summary' );
+		$get( 'api/bookings' );
+		$get( 'api/catalog' );
+		if ( isset( $user['role'] ) && 'CLIENT' === $user['role'] ) {
+			$get( 'api/saved-offers' );
+			$get( 'api/waitlist' );
+		}
+		foreach ( array( 'api/notifications', 'api/conversations', 'api/blocks', 'api/statuses', 'api/notification-preferences', 'api/calls/active' ) as $p ) {
+			$get( $p );
+		}
+	} else {
+		$get( 'api/agencies/active' );
+		$get( 'api/catalog' );
+	}
+	$get( 'api/payments/methods' );
+	$get( 'api/catalog/realtime' );
+	$parts = array();
+	foreach ( $answers as $p => $json ) {
+		// "<" only appears inside JSON strings, where < means the same; this keeps </script> out of the page.
+		$parts[] = json_encode( $p ) . ':' . str_replace( '<', '<', $json );
+	}
+	return '<script>window.__SKW_BOOT__={' . implode( ',', $parts ) . '};</script>';
 }
 
 /** Builds the request array from PHP globals. */

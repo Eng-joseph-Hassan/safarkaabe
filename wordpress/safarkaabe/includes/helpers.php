@@ -146,8 +146,9 @@ function skw_notify( $items ) {
 			continue;
 		}
 		try {
+			$notification_id = skw_uuid();
 			$created += SKW_DB::insert( 'notifications', array(
-				'id'                => skw_uuid(),
+				'id'                => $notification_id,
 				'recipient_user_id' => $item['recipientUserId'],
 				'agency_id'         => isset( $item['agencyId'] ) ? $item['agencyId'] : null,
 				'booking_id'        => isset( $item['bookingId'] ) ? $item['bookingId'] : null,
@@ -160,6 +161,9 @@ function skw_notify( $items ) {
 				'created_at'        => skw_now(),
 				'read_at'           => null,
 			) );
+			if ( function_exists( 'skw_push_for_notification' ) ) {
+				skw_push_for_notification( $item, $notification_id ); // Alert on the phone too, even when the app is closed.
+			}
 		} catch ( Exception $error ) {
 			if ( ! SKW_DB::is_duplicate( $error ) ) {
 				error_log( 'SAFAR KAABE notification failed: ' . $error->getMessage() );

@@ -1906,15 +1906,15 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /globalExploreCarouselHost'\)\.appendChild\(document\.querySelector\('\.customer-hero'\)\)/);
   assert.match(appMarkup, /Available trips/);
   assert.match(appMarkup, /No available trips match these details/);
-  assert.match(appMarkup, /Choose a travel company/);
+  assert.match(appMarkup, /Airport codes are shown after city names/);
   assert.match(appMarkup, /All travel companies/);
-  assert.match(appMarkup, /Trips update automatically about every 15 seconds/);
+  assert.match(appMarkup, /Trips update automatically while this page is open/);
   assert.match(appMarkup, /id="agencyOwnerFields"/);
   assert.match(appMarkup, /function editAgency\(agencyId\)/);
   assert.match(appMarkup, /function deleteAgency\(agencyId\)/);
   assert.match(appMarkup, /onclick="editAgency\(/);
   assert.match(appMarkup, /onclick="deleteAgency\(/);
-  assert.match(appMarkup, /airport codes use three letters/i);
+  assert.match(appMarkup, /Airport codes are shown after city names/i);
   assert.match(appMarkup, /id="bookingSeatCount"[^>]*oninput="updateFinancialEngineView\(\)"/);
   assert.match(appMarkup, /seatCount,\s*paymentMethod/);
   assert.match(appMarkup, /seatCount > Number\(selectedOffer\.available\)/);
@@ -1941,7 +1941,8 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /Continue as Guest|Browse as a guest/);
   assert.match(appMarkup, /id="searchMaxPrice"[^>]*oninput="renderCatalog\(\)"/);
   assert.match(appMarkup, /id="travelerSearchFilters"[^>]*role="search"[^>]*md:grid-cols-2/);
-  assert.match(appMarkup, /Where would you like to go\?[\s\S]*?md:col-span-2[\s\S]*?id="searchAgencyFilter"[^>]*>[\s\S]*?All travel companies/);
+  // Destination and date come first; the travel company is an optional last choice.
+  assert.match(appMarkup, /Where would you like to go\?[\s\S]*?id="searchDest"[\s\S]*?id="searchDate"[\s\S]*?id="searchAgencyFilter"[^>]*>[\s\S]*?All travel companies/);
   assert.match(appMarkup, /id="searchOrigin" type="text" placeholder="Any origin"/);
   assert.match(appMarkup, /label for="searchOrigin" class="travel-search-label">Starting city or airport/);
   assert.match(appMarkup, /label for="searchDate" class="travel-search-label">Travel date/);
@@ -1969,7 +1970,7 @@ test('server authentication, role boundaries, agency CRM and booking ownership',
   assert.match(appMarkup, /function getDestinationDisplayName\(destinationCode\)/);
   assert.match(appMarkup, /item\.agencyId === agencyFilter/);
   assert.match(appMarkup, /Mogadishu[\s\S]*?Nairobi/);
-  assert.match(appMarkup, /Trips update automatically about every 15 seconds/i);
+  assert.match(appMarkup, /Trips update automatically while this page is open/i);
   assert.match(appMarkup, /role="tablist" aria-label="Filter travel offers by category"/);
   assert.match(appMarkup, /function handleCategoryTabKeydown\(event\)/);
   assert.match(appMarkup, /currentCategory === 'ALL' \|\| item\.category === currentCategory/);

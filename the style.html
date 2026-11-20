@@ -706,7 +706,13 @@
       #authGate #authForm > * + * { margin-top: 0.625rem; }
       #authGate .auth-card > p:last-child { margin-top: 0.75rem; }
       #view_CUSTOMER > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
-      #sharedExploreSection .customer-hero { padding: 1rem; gap: 1rem; border-radius: 1.25rem; }
+      #sharedExploreSection .customer-hero { padding: 1rem; gap: 0.75rem; border-radius: 1.25rem; }
+      /* Phones: short header – the title and two buttons, and a wide, low picture strip. */
+      .customer-hero .space-y-3 > span:first-child,
+      .customer-hero .space-y-3 > p { display: none; }
+      #heroHeading { font-size: 1.15rem; line-height: 1.35; }
+      .customer-hero .explore-carousel-frame { aspect-ratio: 2 / 1; }
+      .customer-hero .explore-slide-dot { width: 0.4rem; height: 0.4rem; }
       #categoryTabs {
         flex-wrap: nowrap;
         overflow-x: auto;
@@ -1342,6 +1348,70 @@
     html[data-theme="light"] #globalSearchInput { color: #0f172a; }
     html[data-theme="light"] #agencyKpiGrid .bg-black\/50 { background: #fff; }
     html[data-theme="light"] #agencyKpiGrid .bg-black\/50 .text-xl { color: #0f172a; }
+    /* ---------- WhatsApp-style chat ---------- */
+    #messagesPage { --bubble-own: #5b1d6e; --bubble-peer: #202c33; --chat-ink: #e9edef; --chat-meta: rgba(233, 237, 239, .62); --chat-day: #182229; --chat-menu: #233138; }
+    html[data-theme="light"] #messagesPage { --bubble-own: #f3d4fa; --bubble-peer: #ffffff; --chat-ink: #111b21; --chat-meta: rgba(17, 27, 33, .5); --chat-day: #ffffff; --chat-menu: #ffffff; }
+    #messagesPage #conversationMessages { gap: 2px !important; }
+    #messagesPage .chat-message-row { max-width: min(80%, 40rem) !important; margin-top: 1px; }
+    #messagesPage .chat-message-row.chat-first { margin-top: .55rem; }
+    #messagesPage .chat-receipt-row { max-width: min(92%, 36rem) !important; }
+    #messagesPage .chat-message-row .chat-message-bubble,
+    #messagesPage #conversationMessages > div.chat-message-row > div.chat-message-bubble {
+      position: relative; max-width: 100%; border: 0 !important; padding: .4rem .6rem .35rem .65rem !important; border-radius: .65rem !important;
+      background: var(--bubble-peer) !important; color: var(--chat-ink); box-shadow: 0 1px .5px rgba(0, 0, 0, .22); font-size: .9rem; line-height: 1.38;
+    }
+    #messagesPage .chat-message-own .chat-message-bubble, #messagesPage #conversationMessages > div.chat-message-own > div.chat-message-bubble { background: var(--bubble-own) !important; }
+    #messagesPage .chat-first.chat-message-own .chat-message-bubble { border-top-right-radius: 0 !important; }
+    #messagesPage .chat-first.chat-message-peer .chat-message-bubble { border-top-left-radius: 0 !important; }
+    #messagesPage .chat-first:not(.chat-receipt-row) .chat-message-bubble::before { content: ""; position: absolute; top: 0; width: .55rem; height: .7rem; }
+    #messagesPage .chat-first.chat-message-own .chat-message-bubble::before { right: -.5rem; background: var(--bubble-own); clip-path: polygon(0 0, 100% 0, 0 100%); }
+    #messagesPage .chat-first.chat-message-peer .chat-message-bubble::before { left: -.5rem; background: var(--bubble-peer); clip-path: polygon(0 0, 100% 0, 100% 100%); }
+    #messagesPage .chat-message-bubble::after { content: ""; display: block; clear: both; }
+    #messagesPage .chat-receipt { background: rgba(201, 9, 230, .14) !important; border: 1px solid rgba(201, 9, 230, .3) !important; }
+    #messagesPage .chat-receipt-title { margin-bottom: .2rem; font-size: .72rem; font-weight: 800; color: #E27BF5; }
+    #messagesPage .chat-text { display: inline; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .9rem; color: var(--chat-ink); }
+    #messagesPage .chat-sender { margin-bottom: .1rem; font-size: .75rem; font-weight: 700; color: #E27BF5; }
+    html[data-theme="light"] #messagesPage .chat-sender { color: #a000c4; }
+    #messagesPage .chat-meta { float: right; display: inline-flex; align-items: center; gap: .25rem; margin: .5rem 0 -.2rem .8rem; font-size: .66rem; line-height: 1; color: var(--chat-meta); white-space: nowrap; }
+    #messagesPage .chat-edited { font-style: italic; }
+    #messagesPage .chat-tick { font-size: .72rem; }
+    #messagesPage .chat-tick-read { color: #53bdeb; }
+    #messagesPage .chat-day-divider { display: flex; justify-content: center; margin: .9rem 0 .35rem; }
+    #messagesPage .chat-day-divider span { padding: .32rem .75rem; border-radius: .5rem; background: var(--chat-day); color: var(--chat-meta); font-size: .72rem; font-weight: 600; box-shadow: 0 1px .5px rgba(0, 0, 0, .18); }
+    #messagesPage .chat-msg-menu { position: absolute; top: .2rem; right: .25rem; z-index: 3; opacity: 0; transition: opacity .15s; }
+    #messagesPage .chat-message-bubble:hover .chat-msg-menu, #messagesPage .chat-msg-menu[open], #messagesPage .chat-msg-menu:focus-within { opacity: 1; }
+    @media (hover: none) { #messagesPage .chat-msg-menu { opacity: .75; } }
+    #messagesPage .chat-msg-menu summary { display: grid; width: 1.4rem; height: 1.4rem; place-items: center; border-radius: 999px; background: var(--bubble-peer); color: var(--chat-meta); font-size: .62rem; list-style: none; cursor: pointer; box-shadow: 0 0 6px 4px var(--bubble-peer); }
+    #messagesPage .chat-message-own .chat-msg-menu summary { background: var(--bubble-own); box-shadow: 0 0 6px 4px var(--bubble-own); }
+    #messagesPage .chat-msg-menu summary::-webkit-details-marker { display: none; }
+    #messagesPage .chat-msg-menu-list { position: absolute; top: 1.6rem; right: 0; min-width: 9rem; padding: .3rem 0; border-radius: .6rem; background: var(--chat-menu); box-shadow: 0 10px 28px rgba(0, 0, 0, .35); }
+    #messagesPage .chat-msg-menu-list button { display: flex; width: 100%; align-items: center; gap: .6rem; padding: .55rem .95rem; text-align: left; font-size: .82rem; color: var(--chat-ink); }
+    #messagesPage .chat-msg-menu-list button:hover { background: rgba(127, 127, 127, .12); }
+    #messagesPage .chat-msg-menu-list button.danger { color: #f15c6d; }
+    #messagesPage .chat-message-bubble .message-image { border-radius: .45rem; }
+    /* Composer: a round text box, and one round button that is a microphone until you type. */
+    #messagesPage #replyMessageForm { background: transparent; }
+    #messagesPage #replyMessageText { min-height: 2.75rem !important; max-height: 8rem; padding: .7rem 1.05rem !important; border-radius: 1.4rem !important; resize: none !important; font-size: .95rem; line-height: 1.35; }
+    #messagesPage .reply-composer-row { align-items: flex-end; }
+    #messagesPage .reply-composer-row > button { border-radius: 999px !important; }
+    #messagesPage .reply-composer-row > button.chat-send-button,
+    #messagesPage .reply-composer-row > button.chat-voice-button {
+      display: grid !important; width: 2.75rem !important; height: 2.75rem !important; flex: 0 0 2.75rem !important; padding: 0 !important; place-items: center;
+      border: 0 !important; background: #C909E6 !important; color: #fff !important; box-shadow: 0 6px 16px -6px rgba(201, 9, 230, .8);
+    }
+    #messagesPage .chat-send-button .chat-send-label { display: none; }
+    #messagesPage .chat-send-button i { margin: 0 !important; }
+    #messagesPage #replyMessageForm:not(.has-text) .chat-send-button { display: none !important; }
+    #messagesPage #replyMessageForm.has-text .reply-composer-row > button.chat-voice-button { display: none !important; }
+    /* Each message row animates in (its own layer), so lift the row whose menu is open above the next messages. */
+    #messagesPage .chat-message-row:has(.chat-msg-menu[open]) { position: relative; z-index: 20; }
+    /* While a chat is open, the "turn on call alerts" card sits at the top so it never covers the message box. */
+    body:has(#messagesPage:not(.hidden)) #callAlertsBanner { top: calc(5.5rem + env(safe-area-inset-top, 0px)); bottom: auto !important; }
+    /* Phones: room for the person's name in the chat header. */
+    @media (max-width: 639px) {
+      #messagesPage #conversationMessageSearchButton,
+      #messagesPage #favoriteActiveConversationButton { display: none !important; }
+    }
 </style>
   <script>
     const capacitorPlatform = window.Capacitor && typeof window.Capacitor.getPlatform === 'function'
@@ -1434,6 +1504,11 @@
         <button onclick="mobileMenuNavigate('PROFILE')" data-portal="PROFILE" class="rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-user-pen mr-2 text-blue-300"></i>My profile</button>
         <button onclick="openMessagingCenter(); closeMobileMenu()" class="relative rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs font-bold text-slate-200"><i class="fa-solid fa-comments mr-2 text-blue-300"></i>Messages <span id="mobileMessagesUnreadBadge" class="hidden rounded-full bg-rose-500 px-1.5 text-[9px] text-white"></span></button>
       </div>
+      <label for="mobileLocaleSelect" class="block text-[10px] font-semibold text-slate-400">Language
+        <select id="mobileLocaleSelect" onchange="changeLocale(this.value)" class="obsidian-input mt-1 w-full rounded-xl px-3 py-2 text-xs font-bold text-blue-300">
+          <option value="so">Af-Soomaali</option><option value="en">English</option>
+        </select>
+      </label>
       <label for="mobileCurrencySelect" class="block text-[10px] font-semibold text-slate-400">Currency
         <select id="mobileCurrencySelect" onchange="changeCurrency(this.value); document.getElementById('currencySelect').value=this.value" class="obsidian-input mt-1 w-full rounded-xl px-3 py-2 text-xs font-bold text-blue-300">
           <option value="USD">US dollars ($)</option><option value="SOS">Somali shillings (Sh)</option><option value="EUR">Euros (€)</option>
@@ -1549,12 +1624,12 @@
       </div>
 
       <div class="space-y-1">
-        <div class="text-[10px] font-mono-code uppercase tracking-wider text-slate-500 px-3 pb-2">Marketplace & Bookings</div>
+        <div class="text-[10px] font-mono-code uppercase tracking-wider text-slate-500 px-3 pb-2">Travel</div>
         <button onclick="switchPortal('CUSTOMER')" id="sidebar_CUSTOMER" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition brand-active border">
-          <i class="fa-solid fa-compass w-4 text-center"></i> Traveler Discovery & Search
+          <i class="fa-solid fa-compass w-4 text-center"></i> Find trips
         </button>
         <button onclick="openMyTripsModal()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
-          <i class="fa-solid fa-ticket w-4 text-center"></i> My Trips & Vouchers
+          <i class="fa-solid fa-ticket w-4 text-center"></i> My bookings
           <span id="sidebarTripsBadge" class="ml-auto bg-blue-500/20 text-blue-300 font-mono-code text-[10px] px-2 py-0.5 rounded-full">1</span>
         </button>
         <button id="sidebarSavedOffersButton" onclick="openSavedOffersModal()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
@@ -1564,18 +1639,18 @@
       </div>
 
       <div class="space-y-1 pt-2">
-        <div class="text-[10px] font-mono-code uppercase tracking-wider text-slate-500 px-3 pb-2">Operations & Portals</div>
+        <div class="text-[10px] font-mono-code uppercase tracking-wider text-slate-500 px-3 pb-2">Manage</div>
         <button onclick="switchPortal('AGENCY')" id="sidebar_AGENCY" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
-          <i class="fa-solid fa-building-user w-4 text-center"></i> Agency Company Dashboard
+          <i class="fa-solid fa-building-user w-4 text-center"></i> Agency dashboard
         </button>
         <button onclick="switchPortal('SUPPLIER')" id="sidebar_SUPPLIER" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
-          <i class="fa-solid fa-boxes-stacked w-4 text-center"></i> Inventory Management
+          <i class="fa-solid fa-boxes-stacked w-4 text-center"></i> Trips & seats
         </button>
         <button onclick="switchPortal('ADMIN')" id="sidebar_ADMIN" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
           <i class="fa-solid fa-shield-halved w-4 text-center"></i> Super Admin (Add Agencies)
         </button>
         <button onclick="switchPortal('PROFILE')" id="sidebar_PROFILE" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
-          <i class="fa-solid fa-user-pen w-4 text-center"></i> My Profile & Security
+          <i class="fa-solid fa-user-pen w-4 text-center"></i> My profile
         </button>
         <button onclick="openMessagingCenter()" id="sidebar_MESSAGES" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition">
           <i class="fa-solid fa-comments w-4 text-center"></i> Messages & support
@@ -1863,13 +1938,6 @@
             <h3 class="text-base font-extrabold text-white sm:text-lg">Where would you like to go?</h3>
             <p class="mt-1 text-xs text-slate-300">Choose a destination and date to find available trips. You can leave any choice as “All”.</p>
           </div>
-          <div class="md:col-span-2">
-            <label for="searchAgencyFilter" class="travel-search-label">Travel company</label>
-            <select id="searchAgencyFilter" onchange="renderCatalog()" aria-describedby="searchAgencyHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
-              <option value="ALL">All travel companies</option>
-            </select>
-            <p id="searchAgencyHelp" class="travel-search-help">Optional — see offers from every company.</p>
-          </div>
           <div>
             <label for="searchOrigin" class="travel-search-label">Starting city or airport</label>
             <input id="searchOrigin" type="text" placeholder="Any origin" aria-describedby="searchOriginHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs" />
@@ -1930,6 +1998,13 @@
             <input id="searchDate" type="date" aria-describedby="searchDateHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs" />
             <p id="searchDateHelp" class="travel-search-help">Optional — choose a date to narrow your search.</p>
           </div>
+          <div>
+            <label for="searchAgencyFilter" class="travel-search-label">Travel company</label>
+            <select id="searchAgencyFilter" onchange="renderCatalog()" aria-describedby="searchAgencyHelp" class="w-full obsidian-input rounded-xl px-3 py-2 text-base font-semibold sm:text-xs">
+              <option value="ALL">All travel companies</option>
+            </select>
+            <p id="searchAgencyHelp" class="travel-search-help">Optional — see offers from every company.</p>
+          </div>
           <div class="flex items-end">
             <button id="findTripsButton" type="button" onclick="performGlobalSearch()" class="w-full bg-gradient-to-r from-blue-400 to-blue-500 hover:opacity-95 text-black font-extrabold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-500/20">
             <i class="fa-solid fa-magnifying-glass mr-1.5" aria-hidden="true"></i> Find trips
@@ -1937,7 +2012,7 @@
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-2 px-1">
-          <p class="text-[10px] leading-relaxed text-slate-400">Choose a travel company to see only its available trips. Airport codes use three letters and are shown after city names, for example Mogadishu (MGQ). Trips update automatically about every 15 seconds.</p>
+          <p class="text-[10px] leading-relaxed text-slate-400">Airport codes are shown after city names, for example Mogadishu (MGQ). Trips update automatically.</p>
           <button type="button" onclick="clearTravelSearchFilters()" class="rounded-lg border border-white/10 px-3 py-2 text-[10px] font-bold text-slate-300 hover:border-white/25 hover:text-white">Clear filters</button>
         </div>
 
@@ -1965,7 +2040,7 @@
                 </select>
               </label>
             </div>
-            <p id="travelOffersUpdateStatus" class="px-1 text-[10px] leading-relaxed text-slate-500">Trips update automatically about every 15 seconds while this page is open.</p>
+            <p id="travelOffersUpdateStatus" class="px-1 text-[10px] leading-relaxed text-slate-500">Trips update automatically while this page is open.</p>
             <div id="catalogContainer" class="space-y-3.5" role="tabpanel" aria-labelledby="cat_ALL" tabindex="0"></div>
           </div>
 
@@ -1982,13 +2057,13 @@
               </div>
 
               <div class="hidden grid grid-cols-7 gap-1 text-[9px] font-mono-code text-center font-bold" id="lifecycleStepper">
-                <div id="step_1" class="py-1.5 rounded bg-blue-500 text-black">1.Srch</div>
-                <div id="step_2" class="py-1.5 rounded bg-white/5 text-slate-500">2.Reval</div>
-                <div id="step_3" class="py-1.5 rounded bg-white/5 text-slate-500">3.Quote</div>
-                <div id="step_4" class="py-1.5 rounded bg-white/5 text-slate-500">4.Hold</div>
-                <div id="step_5" class="py-1.5 rounded bg-white/5 text-slate-500">5.Pay</div>
-                <div id="step_6" class="py-1.5 rounded bg-white/5 text-slate-500">6.Conf</div>
-                <div id="step_7" class="py-1.5 rounded bg-white/5 text-slate-500">7.Issu</div>
+                <div id="step_1" class="py-1.5 rounded bg-blue-500 text-black">1 Search</div>
+                <div id="step_2" class="py-1.5 rounded bg-white/5 text-slate-500">2 Check</div>
+                <div id="step_3" class="py-1.5 rounded bg-white/5 text-slate-500">3 Price</div>
+                <div id="step_4" class="py-1.5 rounded bg-white/5 text-slate-500">4 Hold</div>
+                <div id="step_5" class="py-1.5 rounded bg-white/5 text-slate-500">5 Pay</div>
+                <div id="step_6" class="py-1.5 rounded bg-white/5 text-slate-500">6 Confirm</div>
+                <div id="step_7" class="py-1.5 rounded bg-white/5 text-slate-500">7 Ticket</div>
               </div>
 
               <div id="selectedOfferBox" class="p-3.5 rounded-2xl bg-black/50 border border-white/10 text-xs space-y-1.5"></div>
@@ -2749,7 +2824,7 @@
               <input id="replyImageFile" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" onchange="sendSelectedChatImage(this)" aria-label="Choose an image to send" />
               <input id="replyAudioFile" type="file" accept="audio/*" class="hidden" onchange="sendSelectedChatAudio(this)" aria-label="Choose an audio recording to send" />
               <button type="button" onclick="document.getElementById('replyImageFile').click()" class="h-10 w-10 shrink-0 rounded-xl border border-white/10 bg-white/5 text-sky-200" aria-label="Attach image" title="Send image"><i class="fa-regular fa-image" aria-hidden="true"></i></button>
-              <textarea id="replyMessageText" maxlength="5000" rows="1" placeholder="Write a reply..." oninput="handleReplyTyping()" class="obsidian-input min-w-0 flex-1 resize-y rounded-xl px-3 py-2.5 text-xs"></textarea>
+              <textarea id="replyMessageText" maxlength="5000" rows="1" placeholder="Message" oninput="handleReplyTyping()" class="obsidian-input min-w-0 flex-1 resize-y rounded-xl px-3 py-2.5 text-xs"></textarea>
               <button id="recordVoiceMessageButton" type="button" onclick="toggleVoiceRecording()" class="chat-voice-button grid shrink-0 place-items-center rounded-xl border transition hover:brightness-125" aria-label="Record voice message" title="Record voice message"><i class="fa-solid fa-microphone text-xs" aria-hidden="true"></i></button>
               <button type="submit" class="chat-send-button h-10 shrink-0 rounded-xl bg-blue-500 px-4 text-xs font-bold text-black" aria-label="Send message"><i class="fa-solid fa-paper-plane mr-1" aria-hidden="true"></i><span class="chat-send-label">Send</span></button>
             </div>
@@ -2983,7 +3058,7 @@
       && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(navigator.userAgent)
       && !navigator.standalone
       && !window.matchMedia('(display-mode: standalone)').matches;
-    let currentLocale = 'en';
+    let currentLocale = 'so';
     let currentCurrency = 'USD';
     let currentPortal = 'CUSTOMER';
     let currentExploreSlide = savedExploreVideoState.active ? 9 : 0;
@@ -3852,6 +3927,7 @@
     }
 
     function handleReplyTyping() {
+      updateComposerMode();
       if (!activeConversationId || !currentUser) return;
       const hasText = Boolean(document.getElementById('replyMessageText').value.trim());
       if (!hasText) {
@@ -4367,7 +4443,7 @@
           ? avatarMarkup(recipient, conversation.agencyLogoData, conversation.agencyLogoMime, 'h-10 w-10')
           : avatarMarkup(recipient, conversation.customerAvatarData, conversation.customerAvatarMime, 'h-10 w-10');
         const timestamp = conversation.lastMessageAt
-          ? new Date(conversation.lastMessageAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          ? chatListTime(conversation.lastMessageAt)
           : '';
         const favorite = conversationFavorites.has(conversation.id);
         return `<div class="conversation-row flex items-center" data-conversation-id="${escapeHtml(conversation.id)}" data-conversation-search="${escapeHtml(`${recipient} ${conversation.subject} ${conversation.lastMessage || ''}`.toLowerCase())}" data-conversation-unread="${Number(conversation.unreadCount || 0) > 0}" data-conversation-favorite="${favorite}">
@@ -4375,7 +4451,7 @@
             ${identityImage}
             <span class="min-w-0 flex-1">
               <span class="flex items-center justify-between gap-2 text-xs font-semibold text-slate-100"><span class="truncate">${escapeHtml(recipient)}</span><span class="shrink-0 text-[9px] font-normal text-slate-500">${escapeHtml(timestamp)}</span></span>
-              <span class="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400"><span class="truncate">${escapeHtml(conversation.lastMessage || conversation.subject)}</span>${Number(conversation.unreadCount) ? `<span class="shrink-0 rounded-full bg-[#C909E6] px-1.5 text-[9px] font-bold text-white">${Number(conversation.unreadCount)}</span>` : ''}</span>
+              <span class="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400"><span class="truncate" data-no-translate>${escapeHtml(conversation.lastMessage || conversation.subject)}</span>${Number(conversation.unreadCount) ? `<span class="shrink-0 rounded-full bg-[#C909E6] px-1.5 text-[9px] font-bold text-white">${Number(conversation.unreadCount)}</span>` : ''}</span>
               <span class="mt-1 flex items-center gap-1.5 truncate text-[9px] text-slate-500"><span class="h-1.5 w-1.5 shrink-0 rounded-full ${['online', 'typing...'].includes(presenceLabel(conversation)) ? 'bg-[#C909E6]' : presenceLabel(conversation) === 'busy' ? 'bg-rose-400' : 'bg-slate-600'}"></span><span class="truncate">${escapeHtml(presenceLabel(conversation))} · ${escapeHtml(conversation.subject)}</span></span>
             </span>
           </button>
@@ -6352,24 +6428,38 @@
         const wasAtBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
         const previousScrollTop = messages.scrollTop;
         const renderKey = result.messages.map(message => `${message.id}:${message.readAt || ''}:${message.editedAt || ''}:${message.body || ''}`).join('|');
-        if (messages.dataset.renderKey !== renderKey) messages.innerHTML = result.messages.map(message => {
+        if (messages.dataset.renderKey !== renderKey) messages.innerHTML = result.messages.map((message, index, all) => {
           const providerReceipt = message.body.startsWith('WaafiPay payment confirmed by the provider.');
           const ownMessage = message.senderId === currentUser.id;
-          const senderImage = avatarMarkup(message.senderName, message.senderImageData, message.senderImageMime, 'h-8 w-8');
           const attachmentUrl = `/api/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(message.id)}/attachment`;
           const messageType = String(message.messageType || 'TEXT').toUpperCase();
           const media = messageType === 'IMAGE'
             ? `<a href="${attachmentUrl}" target="_blank" rel="noopener"><img class="message-image" src="${attachmentUrl}" alt="${escapeHtml(message.attachmentName || 'Shared image')}" loading="lazy" /></a>`
             : messageType === 'AUDIO'
               ? voicePlayerMarkup(attachmentUrl, message.id, Number(message.durationMs || 0))
-              : `<div class="whitespace-pre-wrap break-words text-xs text-slate-100">${escapeHtml(message.body)}</div>`;
-          return `<div class="chat-message-row flex max-w-[96%] items-end gap-2 ${providerReceipt ? 'w-full justify-center self-center' : ownMessage ? 'chat-message-own self-end flex-row-reverse' : 'chat-message-peer self-start'}" data-message-search="${escapeHtml(`${message.body || ''} ${message.attachmentName || ''}`.toLowerCase())}">
-            ${providerReceipt ? '' : senderImage}
-            <div class="chat-message-bubble max-w-[88%] border px-3 py-2 ${providerReceipt ? 'border-[#C909E6]/30 bg-[#C909E6]/10' : ''}">
-              <div class="mb-1 flex flex-wrap items-center gap-2 text-[9px] text-slate-400">${providerReceipt ? '<span class="font-bold text-[#E27BF5]">Payment confirmed by WaafiPay</span>' : `<span class="font-bold ${ownMessage ? 'text-[#E27BF5]' : 'text-sky-200'}">${escapeHtml(message.senderName)}</span><span>${escapeHtml(message.senderRole.replaceAll('_', ' '))}</span>`}<time>${escapeHtml(new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>${message.editedAt && !providerReceipt ? '<span class="italic">edited</span>' : ''}</div>
+              : `<div class="chat-text" data-no-translate>${escapeHtml(message.body)}</div>`;
+          const created = new Date(message.createdAt);
+          const previous = all[index - 1];
+          const newDay = !previous || new Date(previous.createdAt).toDateString() !== created.toDateString();
+          const firstOfGroup = newDay || previous.senderId !== message.senderId;
+          const safeId = escapeHtml(message.id);
+          const dayDivider = newDay ? `<div class="chat-day-divider" role="separator"><span>${escapeHtml(chatDayLabel(created))}</span></div>` : '';
+          const ticks = ownMessage && !providerReceipt
+            ? `<i class="fa-solid ${message.readAt ? 'fa-check-double chat-tick-read' : 'fa-check'} chat-tick" role="img" aria-label="${message.readAt ? 'Read' : 'Sent'}"></i>`
+            : '';
+          const menuItems = [
+            messageType === 'TEXT' ? `<button type="button" onclick="copyChatMessage('${safeId}')"><i class="fa-regular fa-copy" aria-hidden="true"></i> Copy</button>` : '',
+            ownMessage && !providerReceipt && messageType === 'TEXT' ? `<button type="button" onclick="editConversationMessage('${safeId}')"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>` : '',
+            ownMessage && !providerReceipt ? `<button type="button" class="danger" onclick="deleteConversationMessage('${safeId}')"><i class="fa-regular fa-trash-can" aria-hidden="true"></i> Delete</button>` : ''
+          ].join('');
+          const menu = menuItems ? `<details class="chat-msg-menu"><summary aria-label="Message options"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><div class="chat-msg-menu-list">${menuItems}</div></details>` : '';
+          return `${dayDivider}<div class="chat-message-row flex ${providerReceipt ? 'chat-receipt-row w-full justify-center self-center' : ownMessage ? 'chat-message-own self-end' : 'chat-message-peer self-start'}${firstOfGroup ? ' chat-first' : ''}" data-message-id="${safeId}" data-message-search="${escapeHtml(`${message.body || ''} ${message.attachmentName || ''}`.toLowerCase())}">
+            <div class="chat-message-bubble${providerReceipt ? ' chat-receipt' : ''}">
+              ${menu}
+              ${providerReceipt ? '<div class="chat-receipt-title"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Payment confirmed by WaafiPay</div>' : ''}
+              ${!ownMessage && !providerReceipt && firstOfGroup ? `<div class="chat-sender" data-no-translate>${escapeHtml(message.senderName)}</div>` : ''}
               ${media}
-              ${ownMessage && !providerReceipt ? `<div class="mt-1 text-right text-[9px] ${message.readAt ? 'text-sky-300' : 'text-slate-400'}">${message.readAt ? '✓✓ Read' : '✓ Sent'}</div>` : ''}
-              ${ownMessage && !providerReceipt ? `<div class="mt-1 flex justify-end gap-2">${messageType === 'TEXT' ? `<button type="button" onclick="editConversationMessage('${escapeHtml(message.id)}')" class="text-[9px] text-slate-400 hover:text-white" aria-label="Edit message">Edit</button>` : ''}<button type="button" onclick="deleteConversationMessage('${escapeHtml(message.id)}')" class="text-[9px] text-rose-300 hover:text-rose-200" aria-label="Delete message">Delete</button></div>` : ''}
+              <span class="chat-meta">${message.editedAt && !providerReceipt ? '<span class="chat-edited">edited</span>' : ''}<time datetime="${escapeHtml(message.createdAt)}">${escapeHtml(created.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>${ticks}</span>
             </div>
           </div>`;
         }).join('') || '<div class="m-auto text-xs text-slate-500">No messages yet.</div>';
@@ -6409,6 +6499,7 @@
           body: { message }
         });
         document.getElementById('replyMessageText').value = '';
+        updateComposerMode();
         clearTypingAnnouncement(false);
         closeReplyEmojiPicker();
         await loadConversations();
@@ -6434,6 +6525,51 @@
         showToast('Message updated.');
       } catch (error) { showToast(error.message); }
     }
+
+    function chatDayLabel(date) {
+      const today = new Date();
+      const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+      if (date.toDateString() === today.toDateString()) return 'Today';
+      if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+      return date.toLocaleDateString([], { day: 'numeric', month: 'long', ...(date.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
+    }
+
+    function chatListTime(value) {
+      const date = new Date(value);
+      const label = chatDayLabel(date);
+      if (label === 'Today') return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return label === 'Yesterday' ? label : date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+    }
+
+    async function copyChatMessage(messageId) {
+      const row = document.querySelector(`#conversationMessages [data-message-id="${CSS.escape(messageId)}"]`);
+      const text = row?.querySelector('.chat-text')?.textContent || '';
+      row?.querySelector('.chat-msg-menu')?.removeAttribute('open');
+      try { await navigator.clipboard.writeText(text); showToast('Message copied.'); }
+      catch { showToast('Copying is not available on this device.'); }
+    }
+
+    // Like WhatsApp: the round button is a microphone until you type, then it becomes Send.
+    function updateComposerMode() {
+      const form = document.getElementById('replyMessageForm');
+      const input = document.getElementById('replyMessageText');
+      if (!form || !input) return;
+      form.classList.toggle('has-text', Boolean(input.value.trim()));
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+    }
+
+    document.addEventListener('keydown', event => {
+      // Computers: Enter sends, Shift+Enter starts a new line. Phones keep Enter for new lines.
+      if (event.target?.id !== 'replyMessageText' || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      if (window.matchMedia('(hover: none)').matches) return;
+      event.preventDefault();
+      document.getElementById('replyMessageForm')?.requestSubmit();
+    });
+
+    document.addEventListener('click', event => {
+      document.querySelectorAll('.chat-msg-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.removeAttribute('open'); });
+    });
 
     function messageTypeIsText(message) { return String(message.messageType || 'TEXT').toUpperCase() === 'TEXT'; }
 
@@ -7318,6 +7454,8 @@
 
     function changeLocale(loc) {
       currentLocale = loc;
+      ['localeSelect', 'mobileLocaleSelect'].forEach(id => { const el = document.getElementById(id); if (el) el.value = loc; });
+      if (typeof applyAppLanguage === 'function') applyAppLanguage();
       renderCatalog();
       updateFinancialEngineView();
       persistAppState();
@@ -7568,6 +7706,7 @@
               </div>
               <div class="flex items-center gap-2">
                 ${savedOfferButton(offer)}
+                ${whatsAppTripButton(offer, title, fin)}
                 <button type="button" aria-pressed="${Boolean(isSelected)}" onclick="selectOfferForBooking('${offer.id}')" class="px-4 py-2 rounded-xl text-xs font-extrabold transition ${isSelected ? 'bg-gradient-to-r from-blue-400 to-blue-500 text-black shadow-md' : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'}">
                   ${isSelected ? 'Trip selected' : 'Choose this trip'}
                 </button>
@@ -9474,7 +9613,7 @@
             ? '<span class="text-slate-400">This booking has been canceled and retained in your history.</span>'
             : '<span class="text-slate-400">Your booking confirmation will be available after agency approval.</span>'
           : b.ticketStatus === 'READY'
-            ? `<button type="button" onclick="openBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl bg-[#C909E6] px-3 py-2 font-extrabold text-white hover:bg-[#a000c4]"><i class="fa-solid fa-eye mr-1"></i>Preview Voucher</button><button type="button" onclick="openBookingPdf('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200">Open PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','pdf')" class="rounded-xl border border-blue-400/25 bg-blue-500/10 px-3 py-2 font-bold text-blue-200"><i class="fa-solid fa-file-pdf mr-1"></i>Download PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','jpg')" class="rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2 font-bold text-fuchsia-200"><i class="fa-solid fa-image mr-1"></i>Download JPG</button><button type="button" onclick="printBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200"><i class="fa-solid fa-print mr-1"></i>Print Voucher</button>${b.ticketRetryAvailable ? `<button type="button" onclick="retryMyTicketGeneration('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Create updated copy</button>` : ''}${b.ticketEmailStatus === 'FAILED' ? `<button type="button" onclick="retryBookingTicketEmail('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Retry Email</button>` : ''}`
+            ? `<button type="button" onclick="openBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl bg-[#C909E6] px-3 py-2 font-extrabold text-white hover:bg-[#a000c4]"><i class="fa-solid fa-eye mr-1"></i>Preview Voucher</button>${whatsAppBookingButton(b)}<button type="button" onclick="openBookingPdf('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200">Open PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','pdf')" class="rounded-xl border border-blue-400/25 bg-blue-500/10 px-3 py-2 font-bold text-blue-200"><i class="fa-solid fa-file-pdf mr-1"></i>Download PDF</button><button type="button" onclick="downloadBookingDocument('${escapeHtml(b.id)}','jpg')" class="rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2 font-bold text-fuchsia-200"><i class="fa-solid fa-image mr-1"></i>Download JPG</button><button type="button" onclick="printBookingTicket('${escapeHtml(b.id)}')" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 font-bold text-slate-200"><i class="fa-solid fa-print mr-1"></i>Print Voucher</button>${b.ticketRetryAvailable ? `<button type="button" onclick="retryMyTicketGeneration('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Create updated copy</button>` : ''}${b.ticketEmailStatus === 'FAILED' ? `<button type="button" onclick="retryBookingTicketEmail('${escapeHtml(b.id)}')" class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 font-bold text-amber-200">Retry Email</button>` : ''}`
             : `<button type="button" onclick="retryMyTicketGeneration('${escapeHtml(b.id)}')" class="rounded-xl bg-blue-500 px-3 py-2 font-extrabold text-white hover:bg-blue-400"><i class="fa-solid fa-rotate mr-1"></i>Retry Voucher Generation</button>`;
         const canEdit = ['CLIENT', 'SUPER_ADMIN'].includes(currentUser?.role) &&
           b.state === 'REQUESTED' && b.paymentProvider === 'REQUEST_ONLY';
@@ -9695,6 +9834,28 @@
     }
 
     // ---------- Saved trips ----------
+    function whatsAppLink(text) {
+      return 'https://wa.me/?text=' + encodeURIComponent(text);
+    }
+
+    function whatsAppTripButton(offer, title, fin) {
+      const link = new URL(window.location.pathname, window.location.origin);
+      link.searchParams.set('trip', offer.id);
+      const when = offer.travelDate ? (currentLocale === 'so' ? ` · Taariikh: ${offer.travelDate}` : ` · Date: ${offer.travelDate}`) : '';
+      const text = (currentLocale === 'so'
+        ? `${title} – ${formatMoney(fin.customerGrandTotalCents)}${when}\nKa ballanso SAFAR KAABE: `
+        : `${title} – ${formatMoney(fin.customerGrandTotalCents)}${when}\nBook on SAFAR KAABE: `) + link.href;
+      return `<a href="${escapeHtml(whatsAppLink(text))}" target="_blank" rel="noopener" aria-label="Share on WhatsApp" title="Share on WhatsApp" class="whatsapp-share inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#C909E6]/35 bg-[#C909E6]/10 text-[#E27BF5] hover:bg-[#C909E6]/20"><i class="fa-brands fa-whatsapp text-base" aria-hidden="true"></i></a>`;
+    }
+
+    function whatsAppBookingButton(b) {
+      const link = new URL(window.location.pathname, window.location.origin);
+      const text = currentLocale === 'so'
+        ? `Ballantayda SAFAR KAABE ${b.ref || ''}: ${b.offerTitle || ''}${b.travelDate ? ' · ' + b.travelDate : ''} – waa la xaqiijiyay.\n${link.href}`
+        : `My SAFAR KAABE booking ${b.ref || ''}: ${b.offerTitle || ''}${b.travelDate ? ' · ' + b.travelDate : ''} – confirmed.\n${link.href}`;
+      return `<a href="${escapeHtml(whatsAppLink(text))}" target="_blank" rel="noopener" class="rounded-xl border border-[#C909E6]/35 bg-[#C909E6]/10 px-3 py-2 font-bold text-[#E27BF5]"><i class="fa-brands fa-whatsapp mr-1" aria-hidden="true"></i>Share on WhatsApp</a>`;
+    }
+
     function savedOfferButton(offer) {
       if (currentUser && currentUser.role !== 'CLIENT') return '';
       const saved = SAVED_OFFER_IDS.has(offer.id);
@@ -10126,6 +10287,8 @@
       restoreAppState();
       document.documentElement.classList.add('android-launch-hidden');
       document.getElementById('localeSelect').value = currentLocale;
+      const mobileLocaleSelect = document.getElementById('mobileLocaleSelect');
+      if (mobileLocaleSelect) mobileLocaleSelect.value = currentLocale;
       document.getElementById('currencySelect').value = currentCurrency;
       const travelDateInput = document.getElementById('searchDate');
       const today = new Date().toISOString().slice(0, 10);
@@ -10309,5 +10472,196 @@
     });
   </script>
   <script defer src="/plugins/all.js"></script>
+<script>
+    /* ---------- Af-Soomaali: the words travelers see. English in the page stays the source text. ---------- */
+    const SO_WORDS = {
+      // Start, sign in, menu
+      'Skip': 'Ka bood', 'Next': 'Xiga', 'Continue as Guest': 'Sii wad adigoo marti ah', 'Sign in or create an account': 'Gal ama samee akoon',
+      'Discover more, together': 'Wax badan wada ogaada', 'Explore the world with us': 'Adduunka nala daawo',
+      'Compare published travel offers from approved agencies and plan your next journey in one place.': 'Is barbar dhig safarada shirkadaha la ansixiyay, oo hal meel ka qorshee safarkaaga xiga.',
+      'All flights together in one place': 'Duulimaadyada oo dhan hal meel', 'Your journey starts here': 'Safarkaagu halkan ayuu ka bilaabmaa',
+      'Welcome to': 'Ku soo dhawoow', 'Discover flights, stays, tours and trusted travel agencies—all together in one place.': 'Hel duulimaadyo, hoteello, dalxiis iyo shirkado safar oo la aamini karo — dhammaan hal meel.',
+      'Explore SAFAR KAABE': 'Gal SAFAR KAABE', 'Loading SAFAR KAABE': 'SAFAR KAABE waa soo furmayaa',
+      'Menu': 'Menu', 'Travel marketplace': 'Suuqa safarada', 'Light mode': 'Muuqaal iftiin', 'Explore': 'Safarada', 'Bookings': 'Ballamaha',
+      'Saved trips': 'Safarada la keydiyay', 'My profile': 'Profile-kayga', 'Messages': 'Fariimaha', 'Currency': 'Lacagta', 'Language': 'Luqadda',
+      'US dollars ($)': 'Doolar ($)', 'Somali shillings (Sh)': 'Shilin Soomaali (Sh)', 'Euros (€)': 'Yuuro (€)',
+      'Install app': 'Ku rakib app-ka', 'Install': 'Rakib', 'Traveler sign in': 'Gal – musaafir', 'Create traveler account': 'Samee akoon musaafir',
+      'Agency / staff sign in': 'Gal – shirkad / shaqaale', 'Sign out': 'Ka bax', 'Sign in': 'Gal', 'Secure sign in': 'Gelitaan ammaan ah',
+      'Continue browsing without an account': 'Sii daawo adigoon akoon lahayn', 'Full name': 'Magaca oo buuxa', 'Phone number': 'Lambarka taleefanka',
+      'Email address': 'Email-ka', 'Password': 'Password', 'Use at least 12 characters.': 'Ugu yaraan 12 xaraf.', 'Sign in to SAFAR KAABE': 'Gal SAFAR KAABE',
+      'Forgot password?': 'Ma ilowday password-ka?', 'Account email': 'Email-ka akoonka', 'Send reset code': 'Dir code-ka', '6-digit email code': 'Code-ka 6-da lambar ee email-ka',
+      'New password': 'Password cusub', 'Confirm new password': 'Ku celi password-ka cusub', 'Reset password': 'Beddel password-ka', 'Back to sign in': 'Ku noqo gelitaanka',
+      'Your account and portal access are securely verified.': 'Akoonkaaga si ammaan ah ayaa loo hubiyaa.',
+      'Travel': 'Safar', 'Manage': 'Maamul', 'Find trips': 'Raadi safar', 'My bookings': 'Ballamahayga', 'Agency dashboard': 'Shirkadda',
+      'Trips & seats': 'Safarada & kuraasta', 'Messages & support': 'Fariimaha & caawimaad', 'Guest traveler': 'Musaafir marti ah',
+      'Browsing as a guest': 'Waxaad tahay marti', 'Explore without an account': 'Daawo adigoon akoon lahayn', 'Search travel': 'Raadi safar', 'Profile': 'Profile',
+      // Top of the page and pictures
+      'SAFAR KAABE MARKETPLACE · TRAVEL MADE SIMPLE': 'SAFAR KAABE · SAFAR FUDUD',
+      'All Flights, Baidoa Agencies & Global Tours Together in One Place.': 'Duulimaadyada, shirkadaha Baydhabo iyo dalxiisyada adduunka – hal meel.',
+      'Compare trusted agencies for flights, stays, and tours, with clear support from booking through your return.': 'Is barbar dhig shirkado la aamini karo oo duulimaad, hoteel iyo dalxiis bixiya, laguna caawiyo ilaa aad soo noqoto.',
+      'Compare flight offers': 'Eeg duulimaadyada', 'Discover the world': 'Adduunka baadh', 'Plan your next getaway': 'Qorshee safarkaaga xiga',
+      'Find your island escape': 'Hel jasiirad aad ku nasato', 'Your next flight awaits': 'Duulimaadkaaga xiga ayaa ku sugaya', 'Travel made simple': 'Safar fudud',
+      'Ready for takeoff': 'Diyaar u ah duulimaad', 'Start your journey': 'Bilow safarkaaga', 'Begin your Umrah journey': 'Bilow safarka Cumrada',
+      'Discover the holy city': 'Booqo magaalada barakaysan', 'Tap for sound': 'Taabo si aad u maqasho',
+      'Start with a popular route': 'Ka bilow waddo caan ah', 'Somalia · Kenya · beyond': 'Soomaaliya · Kenya · iyo meelo kale',
+      'Shows offers published by participating agencies': 'Safarada shirkadaha ka qaybgalay',
+      // Kinds of trips
+      'All trips': 'Dhammaan', 'Flights': 'Duulimaad', 'Hotels': 'Hoteel', 'Car Rental': 'Kiro baabuur', 'Tours': 'Dalxiis', 'Transfers': 'Gaadiid', 'Packages': 'Xirmo',
+      'FLIGHT': 'DUULIMAAD', 'HOTEL': 'HOTEEL', 'TOUR': 'DALXIIS', 'CAR': 'BAABUUR', 'TRANSFER': 'GAADIID', 'PACKAGE': 'XIRMO',
+      // Search
+      'Where would you like to go?': 'Xaggee baad u socotaa?',
+      'Choose a destination and date to find available trips. You can leave any choice as “All”.': 'Dooro meesha iyo taariikhda si aad u hesho safarada jira. Doorasho kasta waad ka tagi kartaa “Dhammaan”.',
+      'Starting city or airport': 'Meesha aad ka baxayso', 'Any origin': 'Meel kasta', 'For example: Baidoa or BXX.': 'Tusaale: Baydhabo ama BXX.',
+      'Going to': 'Meesha aad u socoto', 'All destinations': 'Dhammaan meelaha', 'Choose a city, or leave “All destinations”.': 'Dooro magaalo, ama ka tag “Dhammaan meelaha”.',
+      'Travel date': 'Taariikhda safarka', 'Optional — choose a date to narrow your search.': 'Ikhtiyaari – dooro taariikh si aad u hesho natiijo ka yar.',
+      'Travel company': 'Shirkadda safarka', 'All travel companies': 'Dhammaan shirkadaha', 'Optional — see offers from every company.': 'Ikhtiyaari – waxaad arkaysaa shirkad kasta.',
+      'Airport codes are shown after city names, for example Mogadishu (MGQ). Trips update automatically.': 'Koodhka garoonka wuxuu ka dambeeyaa magaca magaalada, tusaale Muqdisho (MGQ). Safaradu si toos ah ayay isu cusbooneysiiyaan.',
+      'Clear filters': 'Nadiifi', 'Available trips': 'Safarada jira', 'Maximum price per traveler (US dollars)': 'Qiimaha ugu badan qofkiiba (doolar)',
+      'Sort offers': 'Kala horraysii', 'Recommended': 'La soo jeediyay', 'Lowest price first': 'Ugu jaban marka hore', 'Highest price first': 'Ugu qaalisan marka hore',
+      'Departure date: soonest': 'Bixitaanka ugu dhow', 'Trips update automatically while this page is open.': 'Safaradu si toos ah ayay isu cusbooneysiiyaan inta boggan furan yahay.',
+      'Mogadishu': 'Muqdisho', 'Hargeisa': 'Hargeysa', 'Baidoa': 'Baydhabo', 'Kismayo': 'Kismaayo', 'Bosaso': 'Boosaaso', 'Galkayo': 'Gaalkacyo', 'Garowe': 'Garoowe', 'Djibouti': 'Jabuuti',
+      'Mogadishu (MGQ)': 'Muqdisho (MGQ)', 'Hargeisa (HGA)': 'Hargeysa (HGA)', 'Garowe (GGR)': 'Garoowe (GGR)', 'Bosaso (BSA)': 'Boosaaso (BSA)', 'Galkayo (GLK)': 'Gaalkacyo (GLK)',
+      'Kismayo (KMU)': 'Kismaayo (KMU)', 'Baidoa (BIB)': 'Baydhabo (BIB)', 'Baidoa (BXX)': 'Baydhabo (BXX)', 'Djibouti (JIB)': 'Jabuuti (JIB)',
+      // Trip cards
+      'Choose this trip': 'Dooro safarkan', 'Trip selected': 'Waa la doortay', 'Estimated price per traveler in US dollars': 'Qiimaha qofkiiba (doolar)',
+      'Flexible departure date': 'Taariikh furan', 'Direct': 'Toos', 'Share on WhatsApp': 'Ku wadaag WhatsApp', 'Save this trip': 'Keydi safarkan',
+      'Remove from saved trips': 'Ka saar kuwa la keydiyay', 'Save for later': 'Keydi', 'Saved': 'La keydiyay',
+      'No available trips match these details. Try changing your search or check again shortly.': 'Ma jiro safar ku habboon. Beddel raadinta ama dib u eeg dhowaan.',
+      // Booking
+      'Your booking': 'Ballantaada', 'Request this trip': 'Codso safarkan', 'Step 1: Choose a trip': 'Tallaabada 1: Dooro safar',
+      '1 Search': '1 Raadi', '2 Check': '2 Hubi', '3 Price': '3 Qiime', '4 Hold': '4 Qabso', '5 Pay': '5 Bixi', '6 Confirm': '6 Xaqiiji', '7 Ticket': '7 Tigidh',
+      'Traveler details': 'Xogta musaafirka', 'Contact details': 'Xogta xiriirka', 'First name': 'Magaca hore', 'Last name': 'Magaca dambe',
+      'Number of travelers / seats': 'Tirada dadka / kuraasta', 'Choose a trip to see available seats.': 'Dooro safar si aad u aragto kuraasta bannaan.',
+      'Payment method': 'Habka lacag bixinta', 'Send booking request · pay later': 'Dir codsiga ballanta · hadhow bixi',
+      'The travel company will confirm seats and the final price.': 'Shirkadda ayaa xaqiijin doonta kuraasta iyo qiimaha dhammaystiran.',
+      'Pay now by phone': 'Hadda ku bixi taleefanka', 'A payment request goes to your phone. Enter your PIN to approve it.': 'Codsi lacag bixin ayaa taleefankaaga u imanaya. Geli PIN-kaaga si aad u ogolaato.',
+      'Your mobile money': 'Lacagtaada moobaylka', 'EVC Plus, Zaad or Sahal': 'EVC Plus, Zaad ama Sahal',
+      'We send the payment request to the phone number above. Use the number of your mobile money account.': 'Codsiga lacagta waxaan u dirnaa lambarka sare. Isticmaal lambarka akoonkaaga lacagta moobaylka.',
+      'No payment is taken with a booking request. The agency will contact you to confirm availability and the final ticket price.': 'Codsiga ballanta lacag lagama qaado. Shirkadda ayaa kula soo xiriiri doonta si ay u xaqiijiso kursiga iyo qiimaha tigidhka.',
+      // My bookings
+      'My Trips & Vouchers': 'Safarradayda & voucher-yada', 'Your approved trips, booking confirmations, and travel documents.': 'Safarradaada la ansixiyay, xaqiijinta ballamaha iyo dukumentiyada safarka.',
+      'Your trip requests and booking details.': 'Codsiyadaada safarka iyo faahfaahinta ballamaha.',
+      'Book a Trip': 'Ballanso safar', 'Print Voucher': 'Daabac voucher-ka', 'Close': 'Xir', 'Search trips': 'Raadi safar', 'Filter trips': 'Kala sooc',
+      'Upcoming': 'Soo socda', 'Pending approval': 'Sugaya ansixin', 'Voucher ready': 'Voucher-ku waa diyaar', 'Past trips': 'Safaradii hore',
+      'Awaiting agency approval': 'Waxa la sugayaa ansixinta shirkadda', 'Ready to download': 'Diyaar u ah soo dejin', 'Preview Voucher': 'Eeg voucher-ka',
+      'Your booking confirmation will be available after agency approval.': 'Xaqiijinta ballantaadu waxay diyaar noqon doontaa marka shirkaddu ansixiso.',
+      'Trips you saved to compare or book later. Prices and seats can change until you send a request.': 'Safarada aad keydisay si aad hadhow u ballansato. Qiimaha iyo kuraastu way is beddeli karaan ilaa aad codsi dirto.',
+      'Requested': 'La codsaday', 'Approved': 'La ansixiyay', 'Rejected': 'La diiday', 'Payment pending': 'Lacag sugaya', 'Payment received': 'Lacag la helay',
+      'Booking confirmation': 'Xaqiijinta ballanta', 'Open PDF': 'Fur PDF', 'Download PDF': 'Soo deji PDF', 'Download JPG': 'Soo deji sawir', 'Print': 'Daabac',
+      'Rate your trip': 'Qiimee safarkaaga', 'Your rating': 'Qiimayntaada', 'Post review': 'Dir qiimaynta',
+      // Chat and common
+      'Chats': 'Wada-hadallada', 'New chat': 'Wada-hadal cusub', 'All': 'Dhammaan', 'Unread': 'Aan la akhrin', 'Send': 'Dir', 'Call': 'Wac',
+      'Available': 'Diyaar', 'Busy': 'Mashquul', 'Away': 'Maqan', 'Calls': 'Wicitaanno', 'Dashboard': 'Bogga hore',
+      'Notification center': 'Ogeysiisyada', 'Your latest updates': 'Wararkaagii ugu dambeeyay', 'Mark all read': 'Dhammaan akhri', 'Clear all': 'Tirtir dhammaan',
+      'Agency managed inventory': 'Waxaa maamusha shirkadda', 'No reviews yet': 'Weli qiimayn ma jirto',
+      'Choose an available offer to begin a booking.': 'Dooro safar si aad u bilowdo ballan.', 'Any budget': 'Qiime kasta',
+      'Trips refresh automatically every 15 seconds while this page is open.': 'Safaradu si toos ah ayay isu cusbooneysiiyaan inta boggan furan yahay.',
+      'Pay now with WaafiPay mobile wallet': 'Hadda ku bixi WaafiPay', 'Secure checkout is not configured yet.': 'Lacag bixinta online weli lama diyaarin.',
+      'Choose an offer above to start a request.': 'Kor ka dooro safar si aad u bilowdo codsi.',
+      // Chat and call alerts
+      'Today': 'Maanta', 'Yesterday': 'Shalay', 'Copy': 'Koobiyee', 'Edit': 'Wax ka beddel', 'Delete': 'Tirtir', 'edited': 'la beddelay', 'Message': 'Fariin',
+      'Message copied.': 'Fariinta waa la koobiyeeyay.', 'Message options': 'Doorashooyinka fariinta', 'Delete chat': 'Tirtir wada-hadalka',
+      'Turn on call alerts': 'Daar ogeysiiska wicitaanka', 'Turn on': 'Daar', 'Private, role-based conversations': 'Wada-hadallo gaar ah', 'Search or start a new chat': 'Raadi ama bilow wada-hadal', 'Favorites': 'Kuwa la jecel yahay', 'Groups': 'Kooxo', 'offline': 'ma joogo', 'typing...': 'wuu qorayaa...', 'Enable device notifications': 'Daar ogeysiisyada taleefanka',
+      'Your phone will ring for SAFAR KAABE calls, and show new messages, even when the app is closed or the screen is locked.': 'Taleefankaagu wuu dhawaaqi doonaa marka lagugu soo waco SAFAR KAABE, wuxuuna muujin doonaa fariimaha cusub – xitaa marka app-ku xiran yahay ama shaashaddu quful tahay.',
+      'Call and message alerts are on. Calls will ring on this device even when SAFAR KAABE is closed.': 'Ogeysiisyada wicitaanka iyo fariimaha waa la daaray. Wicitaannadu way ku soo dhacayaan xitaa marka SAFAR KAABE xiran yahay.',
+      'Select a conversation to view messages, or start a new chat.': 'Dooro wada-hadal si aad u aragto fariimaha, ama bilow mid cusub.',
+      'Cancel': 'Jooji', 'Refresh': 'Cusbooneysii', 'Not now': 'Hadda maya', 'OK': 'Haye'
+    };
+    const SO_PARTS = [
+      [/^Destination: (.+)$/, 'Meesha: $1'], [/^Departure: (.+)$/, 'Bixitaan: $1'], [/^Baggage: (.+)$/, 'Shandad: $1'],
+      [/^(\d+) seats? available$/, '$1 kursi oo bannaan'], [/^(\d+) booking items?$/, '$1 ballan'],
+      [/^(.+) US dollars$/, '$1 doolar'], [/^Only (\d+) seats? left$/, 'Kaliya $1 kursi ayaa haray']
+    ];
+    const soOriginal = new WeakMap();
+
+    function soTranslate(text) {
+      const key = text.replace(/\s+/g, ' ').trim();
+      if (!key) return null;
+      if (Object.prototype.hasOwnProperty.call(SO_WORDS, key)) return SO_WORDS[key];
+      // Lines made of parts ("Destination: X · Departure: Y · 4 seats available"): translate each part.
+      if (key.includes(' · ')) {
+        let changed = false;
+        const parts = key.split(' · ').map(part => {
+          const done = soTranslate(part);
+          if (done !== null) { changed = true; return done; }
+          return part;
+        });
+        return changed ? parts.join(' · ') : null;
+      }
+      for (const [pattern, to] of SO_PARTS) if (pattern.test(key)) return key.replace(pattern, to);
+      return null;
+    }
+
+    function soApplyText(node) {
+      const saved = soOriginal.get(node);
+      // The app changed this text since we translated it: take the new text as the source.
+      const source = saved && node.data === saved.shown ? saved.source : node.data;
+      if (currentLocale !== 'so') {
+        if (saved && node.data === saved.shown) node.data = saved.source;
+        soOriginal.delete(node);
+        return;
+      }
+      const done = soTranslate(source);
+      if (done === null) { soOriginal.delete(node); return; }
+      const shown = source.replace(source.trim(), done);
+      soOriginal.set(node, { source, shown });
+      if (node.data !== shown) node.data = shown;
+    }
+
+    function soApplyAttributes(el) {
+      for (const attr of ['placeholder', 'title', 'aria-label']) {
+        if (!el.hasAttribute(attr)) continue;
+        const store = `data-en-${attr}`;
+        const current = el.getAttribute(attr);
+        let source = el.getAttribute(store);
+        if (source === null || (current !== source && current !== soTranslate(source))) { source = current; el.setAttribute(store, source); }
+        const wanted = currentLocale === 'so' ? (soTranslate(source) ?? source) : source;
+        if (current !== wanted) el.setAttribute(attr, wanted);
+      }
+    }
+
+    function soSkip(el) {
+      return !el || el.closest('script, style, textarea, [contenteditable="true"], [data-no-translate], #messageThread, .chat-message, #statusViewer');
+    }
+
+    function soApply(root) {
+      if (root.nodeType === Node.TEXT_NODE) { if (!soSkip(root.parentElement)) soApplyText(root); return; }
+      if (root.nodeType !== Node.ELEMENT_NODE || soSkip(root)) return;
+      soApplyAttributes(root);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: node => node.nodeType === Node.ELEMENT_NODE
+          ? (node.matches('script, style, textarea, [data-no-translate], #messageThread') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT)
+          : NodeFilter.FILTER_ACCEPT
+      });
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === Node.TEXT_NODE) soApplyText(node);
+        else soApplyAttributes(node);
+      }
+    }
+
+    let soApplying = false;
+    function applyAppLanguage() {
+      soApplying = true;
+      try { soApply(document.body); } finally { soApplying = false; }
+      document.documentElement.lang = currentLocale === 'so' ? 'so' : 'en';
+    }
+
+    new MutationObserver(records => {
+      if (soApplying) return;
+      soApplying = true;
+      try {
+        for (const r of records) {
+          if (r.type === 'characterData') soApply(r.target);
+          else if (r.type === 'attributes') { if (!soSkip(r.target)) soApplyAttributes(r.target); }
+          else r.addedNodes.forEach(soApply);
+        }
+      } finally { soApplying = false; }
+    }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['placeholder', 'title', 'aria-label'] });
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', applyAppLanguage);
+    else applyAppLanguage();
+
+</script>
 </body>
 </html>

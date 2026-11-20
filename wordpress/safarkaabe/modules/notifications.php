@@ -105,14 +105,6 @@ SKW_Router::add( '*', '#^/api/notification-mutes$#', function ( $p, $req ) {
 	return array( 'ok' => true, 'mutedConversationIds' => $prefs['mutedConversationIds'] );
 } );
 
-// Phone push alerts need extra setup that this website does not have yet; the app keeps working without them.
-SKW_Router::add( 'GET', '#^/api/push/public-key$#', function () {
-	return array( 'configured' => false, 'publicKey' => null );
-} );
-SKW_Router::add( '*', '#^/api/push/(subscriptions|native-tokens)$#', function () {
-	skw_mutation();
-	return array( 'ok' => true, 'configured' => false );
-} );
 
 
 /* ---------- Calls ---------- */
@@ -169,8 +161,9 @@ SKW_Router::add( 'POST', '#^/api/conversations/([0-9a-z-]+)/calls$#i', function 
 	}
 	$id  = skw_uuid();
 	$now = skw_now();
-	SKW_DB::insert( 'chat_calls', array( 'id' => $id, 'conversation_id' => $c['id'], 'caller_id' => $user['id'], 'callee_id' => $callee['id'], 'call_type' => $type, 'status' => 'RINGING', 'created_at' => $now, 'caller_device' => isset( $body['deviceId'] ) && is_string( $body['deviceId'] ) ? substr( $body['deviceId'], 0, 64 ) : null ) );
+	SKW_DB::insert( 'chat_calls', array( 'id' => $id, 'conversation_id' => $c['id'], 'caller_id' => $user['id'], 'callee_id' => $callee['id'], 'call_type' => $type, 'status' => 'RINGING', 'created_at' => $now, 'push_token' => skw_b64u_encode( random_bytes( 18 ) ), 'ring_push_at' => $now, 'caller_device' => isset( $body['deviceId'] ) && is_string( $body['deviceId'] ) ? substr( $body['deviceId'], 0, 64 ) : null ) );
 	skw_notify( array( array( 'recipientUserId' => $callee['id'], 'agencyId' => $c['agency_id'], 'conversationId' => $c['id'], 'type' => 'CALL_INCOMING', 'title' => 'Incoming ' . ( 'VIDEO' === $type ? 'video' : 'voice' ) . ' call', 'body' => $user['name'] . ' is calling you. Open SAFAR KAABE to answer.', 'href' => skw_app_link( '?conversation=' . rawurlencode( $c['id'] ) ), 'dedupeKey' => 'CALL_INCOMING:' . $id ) ) );
+	skw_push_call_ring( SKW_DB::get_row( 'SELECT * FROM {chat_calls} WHERE id = ?', array( $id ) ), $user['name'] ); // Rings the phone even when the app is closed.
 	skw_json( 201, array( 'call' => array( 'id' => $id, 'conversationId' => $c['id'], 'callerId' => $user['id'], 'calleeId' => $callee['id'], 'peerName' => $callee['name'], 'callType' => $type, 'status' => 'RINGING', 'createdAt' => $now ) ) );
 } );
 
@@ -182,6 +175,13 @@ SKW_Router::add( 'GET', '#^/api/calls/active$#', function () {
 	foreach ( SKW_DB::get_results( "SELECT * FROM {chat_calls} WHERE status = 'RINGING' AND created_at < ?", array( skw_now( -60 ) ) ) as $call ) {
 		if ( 1 === SKW_DB::query( "UPDATE {chat_calls} SET status = 'MISSED', ended_at = ? WHERE id = ? AND status = 'RINGING'", array( $now, $call['id'] ) ) ) {
 			skw_missed_call_notice( $call, (string) SKW_DB::get_var( 'SELECT name FROM {users} WHERE id = ?', array( $call['caller_id'] ) ) );
+			skw_push_call_ended( $call, 'MISSED' );
+		}
+	}
+	// While someone is calling, ring the other phone again every few seconds (like a phone ringing).
+	foreach ( SKW_DB::get_results( "SELECT * FROM {chat_calls} WHERE caller_id = ? AND status = 'RINGING' AND created_at >= ?", array( $user['id'], skw_now( -55 ) ) ) as $call ) {
+		if ( 1 === SKW_DB::query( 'UPDATE {chat_calls} SET ring_push_at = ? WHERE id = ? AND (ring_push_at IS NULL OR ring_push_at < ?)', array( $now, $call['id'], skw_now( -6 ) ) ) ) {
+			skw_push_call_ring( $call, $user['name'] );
 		}
 	}
 	$stale = skw_now( -90 );
@@ -270,13 +270,20 @@ SKW_Router::add( 'PATCH', '#^/api/calls/([0-9a-z-]+)$#i', function ( $p ) {
 	$action = isset( $body['action'] ) && is_string( $body['action'] ) ? strtoupper( $body['action'] ) : '';
 	$now    = skw_now();
 	if ( 'ACCEPT' === $action && $call['callee_id'] === $user['id'] && 'RINGING' === $call['status'] ) {
-		SKW_DB::query( "UPDATE {chat_calls} SET status = 'ACCEPTED', accepted_at = ?, callee_device = ? WHERE id = ? AND status = 'RINGING'", array( $now, isset( $body['deviceId'] ) && is_string( $body['deviceId'] ) ? substr( $body['deviceId'], 0, 64 ) : null, $call['id'] ) );
+		if ( 1 === SKW_DB::query( "UPDATE {chat_calls} SET status = 'ACCEPTED', accepted_at = ?, callee_device = ? WHERE id = ? AND status = 'RINGING'", array( $now, isset( $body['deviceId'] ) && is_string( $body['deviceId'] ) ? substr( $body['deviceId'], 0, 64 ) : null, $call['id'] ) ) ) {
+			skw_push_call_ended( $call, 'ANSWERED' ); // Stops the ringing on the person's other devices.
+		}
 	} elseif ( 'REJECT' === $action && $call['callee_id'] === $user['id'] && 'RINGING' === $call['status'] ) {
-		SKW_DB::query( "UPDATE {chat_calls} SET status = 'REJECTED', ended_at = ? WHERE id = ? AND status = 'RINGING'", array( $now, $call['id'] ) );
+		if ( 1 === SKW_DB::query( "UPDATE {chat_calls} SET status = 'REJECTED', ended_at = ? WHERE id = ? AND status = 'RINGING'", array( $now, $call['id'] ) ) ) {
+			skw_push_call_ended( $call, 'DECLINED' );
+		}
 	} elseif ( 'END' === $action && 'RINGING' === $call['status'] ) {
 		$status = $call['caller_id'] === $user['id'] ? 'MISSED' : 'REJECTED';
 		if ( 1 === SKW_DB::query( "UPDATE {chat_calls} SET status = ?, ended_at = ? WHERE id = ? AND status = 'RINGING'", array( $status, $now, $call['id'] ) ) && 'MISSED' === $status ) {
 			skw_missed_call_notice( $call, $user['name'] );
+			skw_push_call_ended( $call, 'MISSED' );
+		} elseif ( 'REJECTED' === $status ) {
+			skw_push_call_ended( $call, 'DECLINED' );
 		}
 	} elseif ( 'END' === $action && 'ACCEPTED' === $call['status'] ) {
 		SKW_DB::query( "UPDATE {chat_calls} SET status = 'ENDED', ended_at = ? WHERE id = ? AND status = 'ACCEPTED'", array( $now, $call['id'] ) );

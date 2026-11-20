@@ -12,6 +12,7 @@ require SKW_DIR . 'includes/schema.php';
 require SKW_DIR . 'includes/http.php';
 require SKW_DIR . 'includes/helpers.php';
 require SKW_DIR . 'includes/auth.php';
+require SKW_DIR . 'includes/webpush.php';
 require SKW_DIR . 'includes/app.php';
 
 if ( getenv( 'SKW_TEST_MYSQL' ) ) {

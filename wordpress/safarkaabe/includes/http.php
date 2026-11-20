@@ -63,7 +63,18 @@ function skw_header( $name, $value ) {
 }
 
 function skw_send_headers( $status, $type ) {
-	global $skw_response_headers;
+	global $skw_response_headers, $skw_capture_status;
+	if ( null !== $skw_capture_status ) {
+		// Answer prepared inside this request (see skw_internal_get): keep only the cookies.
+		$skw_capture_status = $status;
+		foreach ( (array) $skw_response_headers as $h ) {
+			if ( 'set-cookie' === strtolower( $h[0] ) && ! headers_sent() ) {
+				header( $h[0] . ': ' . $h[1], false );
+			}
+		}
+		$skw_response_headers = array();
+		return;
+	}
 	if ( headers_sent() ) {
 		return;
 	}

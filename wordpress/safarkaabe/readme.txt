@@ -3,7 +3,7 @@ Contributors: anfacmedia
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 
 The SAFAR KAABE travel marketplace running fully inside WordPress at /safarkaabe/ – like ANFAC System runs at /system/.
@@ -29,7 +29,8 @@ Included:
   * The traveler approves the payment with their PIN on their phone.
   * A booking is never charged twice.
   * An unclear answer from the payment provider is shown to the agency as "check your merchant portal", never as failed.
-* Chat between travelers, agencies and support, with photos, voice messages, read ticks, typing, blocking, and voice and video calls.
+* Chat in a WhatsApp-style layout between travelers, agencies and support, with photos, voice messages, read ticks, typing, blocking, and voice and video calls.
+* Call and message alerts on phones and computers, even when the app is closed: an incoming call rings with Answer and Decline buttons. Each person turns them on once ("Turn on call alerts").
 * Notifications in the app, notification settings, sales reports with Excel (CSV) download, and an activity history.
 * Booking confirmation: a branded PDF voucher and a phone-friendly image. It is emailed to the traveler automatically when the agency confirms.
 * Status updates (24 hours, for Everyone or Contacts only) with views, replies and reactions, and communities (group chats).
@@ -40,7 +41,6 @@ Included:
 
 Not on the website version yet:
 
-* Phone push alerts while the app is closed.
 * Automatic refunds (the agency sends the money and records the refund).
 
 == Installation ==
@@ -62,10 +62,34 @@ If /safarkaabe/ shows another page:
 = Where is the data? =
 In your WordPress database, in the tables that start with wp_sk_. Deleting the plugin removes only its settings, never your data.
 
+= Do calls ring when the app is closed? =
+Yes, after the person taps "Turn on call alerts" (once per phone or computer). Android phones and computers: works in Chrome, Edge and Firefox. iPhone: first add SAFAR KAABE to the Home Screen (Share → Add to Home Screen), then turn on alerts. The alert rings like a notification with Answer and Decline buttons.
+
 = Does it use the SAFAR KAABE Vercel app? =
 No. This plugin is a separate, complete copy that runs only on your website.
 
 == Changelog ==
+
+= 1.4.0 =
+* Calls ring on the phone even when SAFAR KAABE is closed (Answer / Decline on the alert), and new messages arrive as alerts. Uses standard browser push; no extra account is needed.
+* WhatsApp-style chat: message bubbles, time and read ticks inside each bubble, Today / Yesterday dividers, a small menu for Copy, Edit and Delete, and one round button that is a microphone until you type.
+* Computers: Enter sends a message, Shift+Enter starts a new line.
+
+= 1.3.0 =
+* Easier to use: the app opens in Somali (English is one tap away, also in the phone menu).
+* Simpler names in the menu: Find trips, My bookings, Agency dashboard, Trips & seats, My profile.
+* Search starts with where you are going and the date; the travel company is an optional last choice.
+* Phones: a shorter top section, so search and trips show right away.
+* Share a trip or a confirmed booking on WhatsApp with one tap.
+
+= 1.2.0 =
+* Much faster opening: the first information the app needs comes inside the page, so it shows right away without extra waiting.
+* Images, logo, styles and the video load straight from your hosting without starting WordPress.
+* Reading requests are answered before your theme and other plugins start.
+* The app checks the server less often in the background (calls every 5 seconds, 15 when the app is in the background; notifications every 20 seconds; new trips every minute). This keeps your whole website fast.
+
+= 1.1.1 =
+* Faster: pages open quicker. Styles are prepared in advance instead of in the browser, and fonts and icons no longer hold up the page.
 
 = 1.1.0 =
 * New: booking confirmation PDF and image, emailed on confirmation.

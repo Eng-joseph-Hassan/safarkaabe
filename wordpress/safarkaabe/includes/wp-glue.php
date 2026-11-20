@@ -8,8 +8,10 @@ if ( ! defined( 'ABSPATH' ) || ! defined( 'SKW_RUNNING' ) ) {
 }
 
 function skw_wp_setup_globals() {
-	global $skw_config_loader, $skw_base_path, $skw_site_origin, $skw_mailer;
+	global $skw_config_loader, $skw_base_path, $skw_site_origin, $skw_mailer, $skw_asset_base;
 	SKW_DB::use_wpdb();
+	// Images, styles and the video load straight from the plugin folder, without starting WordPress.
+	$skw_asset_base    = plugin_dir_url( SKW_DIR . 'safarkaabe.php' ) . 'app/';
 	$home_path         = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
 	$skw_base_path     = rtrim( $home_path, '/' ) . '/' . trim( (string) get_option( 'skw_slug', 'safarkaabe' ), '/' ) . '/';
 	$parts             = wp_parse_url( home_url() );
@@ -69,6 +71,18 @@ function skw_wp_route() {
 	exit;
 }
 add_action( 'init', 'skw_wp_route', 1 );
+
+/*
+ * Reading (opening the app, loading trips, checking for calls) is answered earlier, before the theme and the
+ * other plugins start up, which makes it much faster. Changes (POST, PATCH ...) still wait for 'init' above so
+ * email and security plugins are fully ready.
+ */
+add_action( 'plugins_loaded', function () {
+	$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) : 'GET';
+	if ( 'GET' === $method || 'HEAD' === $method ) {
+		skw_wp_route();
+	}
+}, 20 );
 
 /** Never let WordPress "correct" the app address to another page. */
 add_filter( 'redirect_canonical', function ( $redirect ) {
